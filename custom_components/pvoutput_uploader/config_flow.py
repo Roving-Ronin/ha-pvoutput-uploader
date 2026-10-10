@@ -531,6 +531,7 @@ class PVOutputUploaderOptionsFlow(OptionsFlow):
                 else "none, everything recorded was sent",
                 "pending": str(summary.get("pending", 0)),
                 "failed": str(summary.get("failed", 0)),
+                "partial": str(summary.get("partial", 0)),
                 "expired": str(summary.get("expired", 0)),
             },
             errors=errors,

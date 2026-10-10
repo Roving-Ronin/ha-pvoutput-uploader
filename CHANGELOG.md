@@ -2,6 +2,7 @@
 
 ## 0.0.1b5
 
+- When PVOutput rejects a status for a value it names (power or energy too high, generation at night), the status is sent once more without that value, so the other fields still arrive. It counts as **Partly sent** (new diagnostic sensor) and stays unsent, so **Reupload history → since the first unsent status** sends it whole once fixed. Other rejections are not retried.
 - Field sensor attribute `sent` renamed to `configured_to_send` (and `not_sent_because` to `not_configured_to_send_because`): it means the field is active and allowed by the account type, not that uploading is on or that PVOutput accepted it.
 
 ## 0.0.1b4

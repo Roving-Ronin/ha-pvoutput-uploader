@@ -115,7 +115,7 @@
       },
       "reupload": {
         "title": "Reupload history",
-        "description": "Waiting to be sent: {pending} samples. Rejected by PVOutput: {failed}. Too old to send as statuses: {expired}. First unsent: **{first_unsent}**.\n\nStatuses that could not be sent (uploading switched off, PVOutput or network errors, rate limit) are sent automatically when uploading can continue. Use this to send again what PVOutput rejected, or any period from a chosen time, like IoTaWatt's reload.\n\nSending runs in the background at the pace PVOutput's hourly request limit allows. Statuses can be sent for the last {status_days} days; older days only as daily totals (energy, peak power, min/max temperature).",
+        "description": "Waiting to be sent: {pending} samples. Rejected by PVOutput: {failed}. Sent without values PVOutput rejected: {partial}. Too old to send as statuses: {expired}. First unsent: **{first_unsent}**.\n\nStatuses that could not be sent (uploading switched off, PVOutput or network errors, rate limit) are sent automatically when uploading can continue. Use this to send again what PVOutput rejected, or any period from a chosen time, like IoTaWatt's reload.\n\nSending runs in the background at the pace PVOutput's hourly request limit allows. Statuses can be sent for the last {status_days} days; older days only as daily totals (energy, peak power, min/max temperature).",
         "data": {
           "from": "Start",
           "start": "Date and time",
@@ -189,7 +189,7 @@
     },
     "reupload_from": {
       "options": {
-        "since_failure": "Since the first unsent status (waiting, rejected or too old)",
+        "since_failure": "Since the first unsent status (waiting, rejected, partly sent or too old)",
         "from_time": "From a date and time"
       }
     },
@@ -208,6 +208,7 @@
       "queued_outputs": { "name": "Daily outputs waiting" },
       "failed_samples": { "name": "Rejected samples" },
       "failed_outputs": { "name": "Rejected daily outputs" },
+      "partial_samples": { "name": "Partly sent samples" },
       "history_samples": { "name": "History samples" },
       "history_oldest": { "name": "History start" },
       "rate_limit_remaining": { "name": "Requests left this hour" },

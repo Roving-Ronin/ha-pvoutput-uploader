@@ -36,6 +36,7 @@ from custom_components.pvoutput_uploader.store import (
     DONE,
     EXPIRED,
     FAILED,
+    PARTIAL,
     PENDING,
     Sample,
     SampleStore,
@@ -659,3 +660,78 @@ async def test_one_bad_day_in_a_batch_of_outputs(
     assert [p["d"] for p in up.client.outputs] == ["20261001"]
     assert await up._run(up.store.queued_outputs, 10) == []
     assert [d for d, _ in await up._run(up.store.rejected_outputs)] == ["20261002"]
+
+
+def _counting(fail: Callable[[list[str]], Exception | None]) -> tuple[list[int], Any]:
+    attempts = [0]
+
+    def check(kind: str, lines: list[str]) -> Exception | None:
+        attempts[0] += 1
+        return fail(lines)
+
+    return attempts, check
+
+
+async def test_rejected_value_is_left_out_once(
+    hass: HomeAssistant, tmp_path: Path, now: FrozenDateTimeFactory
+) -> None:
+    up = await make(hass, tmp_path, [field("v2"), field("v5")])
+    ts = local_ts(10, 10, 10, 5)
+    await add(up, Sample(ts, {"v2": 99999.0, "v5": 20.0}), last_built=ts)
+    attempts, up.client.fail = _counting(
+        lambda lines: PVOutputBadRequest(
+            "Bad request 400: Power value 99999 too high for system size 13320"
+        )
+        if any(",99999" in line for line in lines)
+        else None
+    )
+    await up._async_upload_statuses()
+    # The temperature still reaches PVOutput, without the rejected power.
+    assert up.client.batches == [["20261010,10:05,,,,,20"]]
+    assert attempts[0] == 2
+    assert (await states(up, 0, 2**40))[ts] == PARTIAL
+    # Partly sent counts as unsent, for a reupload once the value is fixed.
+    assert await up.async_first_unsent() == ts
+
+
+async def test_unknown_rejection_is_not_retried(
+    hass: HomeAssistant, tmp_path: Path, now: FrozenDateTimeFactory
+) -> None:
+    up = await make(hass, tmp_path, [field("v2"), field("v5")])
+    ts = local_ts(10, 10, 10, 5)
+    await add(up, Sample(ts, {"v2": 500.0, "v5": 20.0}), last_built=ts)
+    attempts, up.client.fail = _counting(
+        lambda lines: PVOutputBadRequest("Bad request 400: Something else")
+    )
+    await up._async_upload_statuses()
+    assert attempts[0] == 1
+    assert (await states(up, 0, 2**40))[ts] == FAILED
+
+
+async def test_rejected_again_without_the_value(
+    hass: HomeAssistant, tmp_path: Path, now: FrozenDateTimeFactory
+) -> None:
+    up = await make(hass, tmp_path, [field("v1", aggregate=AGG_ENERGY_TODAY), field("v5")])
+    ts = local_ts(10, 10, 2, 0)
+    await add(up, Sample(ts, {"v1": 50.0, "v5": 20.0}), last_built=ts)
+    attempts, up.client.fail = _counting(
+        lambda lines: PVOutputBadRequest("Bad request 400: Moon Powered")
+    )
+    await up._async_upload_statuses()
+    assert attempts[0] == 2  # the full status, then once without v1
+    assert up.client.batches == []
+    assert (await states(up, 0, 2**40))[ts] == FAILED
+
+
+async def test_no_retry_when_only_fixed_values_would_be_left(
+    hass: HomeAssistant, tmp_path: Path, now: FrozenDateTimeFactory
+) -> None:
+    up = await make(hass, tmp_path, [field("v2"), field("v6", entity=None, constant=230)])
+    ts = local_ts(10, 10, 10, 5)
+    await add(up, Sample(ts, {"v2": 99999.0}), last_built=ts)
+    attempts, up.client.fail = _counting(
+        lambda lines: PVOutputBadRequest("Bad request 400: Power value 99999 too high")
+    )
+    await up._async_upload_statuses()
+    assert attempts[0] == 1
+    assert (await states(up, 0, 2**40))[ts] == FAILED

@@ -6,6 +6,7 @@
       "queued_outputs": { "default": "mdi:calendar-clock" },
       "failed_samples": { "default": "mdi:alert-circle-outline" },
       "failed_outputs": { "default": "mdi:calendar-remove" },
+      "partial_samples": { "default": "mdi:progress-alert" },
       "history_samples": { "default": "mdi:database" },
       "history_oldest": { "default": "mdi:history" },
       "rate_limit_remaining": { "default": "mdi:speedometer" },

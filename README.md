@@ -68,6 +68,7 @@ homeassistant:
 | Hourly request limit reached | Uploading pauses until PVOutput's reset time, then continues where it stopped. The pause survives restarts. |
 | **Uploading** switched off | Recording continues. The backlog is sent when it is switched back on. |
 | PVOutput does not confirm a status (a batch answers `0`, or the status lacks v1-v4 because IoTaWatt has not created it yet) | Only statuses PVOutput confirms count as sent; the rest are retried for two hours. |
+| PVOutput rejects one value of a status (power or energy too high, generation at night) | The status is sent once more without the value PVOutput named, so the other fields still arrive. It is counted as **Partly sent** and stays unsent for a reupload. Other rejections are not retried. |
 | Integration disabled, reloaded or reinstalled while Home Assistant runs, for less time than the recorder keeps states | On start, the log is filled from the recorder for the whole missed period with full 5 minute detail (about 2 days of history per minute), and the backlog is sent. |
 | Home Assistant itself off | No values exist for that time anywhere. Energy counters carry on, so **energy since midnight stays correct**: the energy of the outage is counted in the first interval after the restart. |
 
@@ -84,7 +85,7 @@ automatically.
 
 | Situation | Action |
 |---|---|
-| PVOutput rejected a status (shown in **Rejected samples**) | **Reupload history → since the first unsent status** |
+| PVOutput rejected a status, or part of it (shown in **Rejected samples** and **Partly sent samples**) | Fix the cause (e.g. the sensor), then **Reupload history → since the first unsent status** |
 | PVOutput rejected a daily total (shown in **Rejected daily outputs**) | **Reupload history** for that day, sent as daily totals |
 | You want a period sent again (e.g. a field was made active, or PVOutput data was edited) | **Reupload history → from a date and time** |
 | The integration was not running for longer than the recorder keeps states | **Import history from Home Assistant** fills the rest from hourly statistics (sensors without a `state_class` have none) |
@@ -218,8 +219,8 @@ The PVOutput system's device page shows what is uploaded and as what:
   diagnostic sensors for that.
 - **Uploading** switch: stops sending while recording carries on.
 - Diagnostic sensors: last upload, samples waiting, daily outputs waiting, rejected
-  samples, rejected daily outputs, history size and start, requests left this hour, rate
-  limit pause, account type, last error.
+  samples, partly sent samples, rejected daily outputs, history size and start, requests
+  left this hour, rate limit pause, account type, last error.
 
 ## Settings
 

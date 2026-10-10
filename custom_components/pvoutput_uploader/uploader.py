@@ -64,7 +64,7 @@ from .const import (
     STATUS_DAYS_DONOR,
     STATUS_DAYS_STANDARD,
 )
-from .store import DONE, EXPIRED, FAILED, PENDING, Sample, SampleStore
+from .store import DONE, EXPIRED, FAILED, PARTIAL, PENDING, Sample, SampleStore
 
 _LOGGER = logging.getLogger(__name__)
 _T = TypeVar("_T")
@@ -76,6 +76,13 @@ META_LAST_PURGE = "last_purge"
 REUPLOAD_AUTO = "auto"
 REUPLOAD_STATUSES = "statuses"
 REUPLOAD_OUTPUTS = "outputs"
+
+# Values a PVOutput error message names, sent again without them once.
+REJECTED_VALUE_FIELDS = (
+    ("power value", ("v2", "v4")),
+    ("energy value", ("v1", "v3")),
+    ("moon powered", ("v1", "v2")),
+)
 
 # Status fields addbatchstatus.jsp accepts, in its column order.
 BATCH_KEYS = tuple(f"v{n}" for n in range(1, 13))
@@ -404,19 +411,7 @@ class Uploader:
                 continue
 
             try:
-                if single:
-                    slot, values = entries[0]
-                    local = _local(slot)
-                    await self.client.add_status(
-                        {"d": local.strftime("%Y%m%d"), "t": local.strftime("%H:%M")}
-                        | values
-                    )
-                    confirmed = {slot}
-                else:
-                    answer = await self.client.add_batch_status(
-                        [self._batch_line(slot, values) for slot, values in entries]
-                    )
-                    confirmed = self._confirmed(answer, [slot for slot, _ in entries])
+                confirmed = await self._send(entries, single)
             except PVOutputRateLimited as err:
                 await self._pause(err.reset, str(err))
                 return
@@ -425,7 +420,7 @@ class Uploader:
                 _LOGGER.error("PVOutput refused the API key: %s", err)
                 return
             except PVOutputBadRequest as err:
-                await self._handle_rejected(entries, str(err), deferred)
+                await self._handle_rejected(entries, str(err), deferred, single)
                 continue
 
             for slot, _ in entries:
@@ -437,6 +432,22 @@ class Uploader:
                 self.last_upload = dt_util.utcnow()
                 self.last_error = None
             self._batch_limit = min(self.batch_size, self._batch_limit * 2)
+
+    async def _send(
+        self, entries: list[tuple[int, dict[str, str]]], single: bool
+    ) -> set[int]:
+        """Send statuses and return the slots PVOutput confirmed."""
+        if single:
+            slot, values = entries[0]
+            local = _local(slot)
+            await self.client.add_status(
+                {"d": local.strftime("%Y%m%d"), "t": local.strftime("%H:%M")} | values
+            )
+            return {slot}
+        answer = await self.client.add_batch_status(
+            [self._batch_line(slot, values) for slot, values in entries]
+        )
+        return self._confirmed(answer, [slot for slot, _ in entries])
 
     @staticmethod
     def _confirmed(answer: str, slots: list[int]) -> set[int]:
@@ -485,13 +496,14 @@ class Uploader:
         entries: list[tuple[int, dict[str, str]]],
         message: str,
         deferred: set[int],
+        single: bool,
     ) -> None:
         """Deal with a 400 answer."""
         if len(entries) > 1:
             # Split the batch until the status PVOutput objects to is found.
             self._batch_limit = max(1, len(entries) // 2)
             return
-        slot = entries[0][0]
+        slot, values = entries[0]
         text = message.lower()
         if "missing energy and power" in text or "v1, v2, v3 or v4" in text:
             # Only extra fields are sent and the uploader of v1-v4 (e.g. IoTaWatt)
@@ -503,9 +515,54 @@ class Uploader:
             if self.entry.options.get(CONF_OUTPUT_FALLBACK, False):
                 await self._queue_days({_local(slot).strftime("%Y%m%d")})
         else:
-            await self._mark_slot(slot, FAILED)
+            retried = await self._send_without_rejected(slot, values, message, single)
+            if retried is None:
+                return  # rate limited: stays waiting, sent whole after the pause
+            if not retried:
+                await self._mark_slot(slot, FAILED)
         self.last_error = f"{_local(slot).isoformat()}: {message}"
         _LOGGER.warning("PVOutput rejected the status for %s: %s", _local(slot), message)
+
+    async def _send_without_rejected(
+        self, slot: int, values: dict[str, str], message: str, single: bool
+    ) -> bool | None:
+        """Retry once without the values PVOutput's message names.
+
+        Returns True when the rest was accepted (the slot is marked partly sent,
+        so a reupload since the first unsent status sends it whole), False when
+        there is nothing to retry or it was rejected again, and None when the
+        rate limit stopped it.
+        """
+        text = message.lower()
+        drop = {
+            key
+            for phrase, keys in REJECTED_VALUE_FIELDS
+            if phrase in text
+            for key in keys
+        } & values.keys()
+        rest = {k: v for k, v in values.items() if k not in drop}
+        sensors = {m.field for m in self.active_mappings if m.entity_id}
+        if not drop or not sensors & rest.keys():
+            return False
+        try:
+            confirmed = await self._send([(slot, rest)], single)
+        except PVOutputRateLimited as err:
+            await self._pause(err.reset, str(err))
+            return None
+        except PVOutputBadRequest as err:
+            _LOGGER.warning(
+                "PVOutput rejected the status for %s also without %s: %s",
+                _local(slot), ", ".join(sorted(drop)), err,
+            )
+            return False
+        if slot not in confirmed:
+            return False
+        await self._mark_slot(slot, PARTIAL)
+        _LOGGER.warning(
+            "Sent the status for %s without %s, which PVOutput rejected: %s",
+            _local(slot), ", ".join(sorted(drop)), message,
+        )
+        return True
 
     async def _mark_slot(self, slot: int, state: int) -> None:
         step = self.upload_interval

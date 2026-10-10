@@ -17,6 +17,8 @@ PENDING = 0
 DONE = 1
 EXPIRED = 2
 FAILED = 3
+# Sent without values PVOutput rejected; counts as unsent for a reupload.
+PARTIAL = 4
 
 
 @dataclass(slots=True)
@@ -273,6 +275,7 @@ class SampleStore:
             "total": sum(counts.values()),
             "pending": counts.get(PENDING, 0),
             "failed": counts.get(FAILED, 0),
+            "partial": counts.get(PARTIAL, 0),
             "expired": counts.get(EXPIRED, 0),
             "oldest": oldest,
             "newest": newest,
