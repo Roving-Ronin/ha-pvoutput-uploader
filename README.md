@@ -5,30 +5,56 @@
 Send any Home Assistant sensor to [PVOutput](https://pvoutput.org) **without ever leaving
 a gap**.
 
-Whatever stops the uploads (PVOutput down, the internet out, the hourly limit reached,
-uploading switched off, the integration disabled, Home Assistant restarted), the data
-is not lost. The integration keeps its own 5 minute history log, fills it from Home
-Assistant's recorder, and sends whatever PVOutput has not confirmed as soon as it can. Like
-the PVOutput service of the IoTaWatt firmware, history can also be sent again from any
-point in time.
+The integration keeps its **own history log**: every 5 minutes it stores the values of
+every configured sensor, and it keeps them for **400 days** (configurable), however short
+Home Assistant's recorder history is. Whatever stops the uploads (PVOutput down, the
+internet out, the hourly limit, uploading switched off), the data waits in the log and is
+sent as soon as PVOutput accepts it, **without you doing anything**. Like the PVOutput
+service of the IoTaWatt firmware, any period in the log can also be sent again.
+
+## Where your data lives
+
+| | What it holds | How long | Used for |
+|---|---|---|---|
+| **History log** (`pvoutput_uploader_<system id>.db` in the configuration folder) | 5 minute values of every configured sensor, active and passive, temperatures included | **400 days** by default (*Settings → Keep history for*) | Everything that is sent and reuploaded |
+| Home Assistant **recorder** states | Every state change of the sensors | `purge_keep_days` of the recorder (10 days by default) | Feeding the log every minute, and catching up after the integration was not running |
+| Home Assistant **long term statistics** | Hourly mean/min/max, or energy change, of sensors that have a `state_class` | Forever | Only **Import history**, for periods the log never recorded |
+
+The log is part of Home Assistant backups, and it survives removing and re-adding the
+integration (it is named after the PVOutput system ID).
+
+So the recorder only has to cover the longest time the integration might not be running,
+and long term statistics are only needed for time before the integration was installed.
 
 ## No gaps: what happens when uploads are disrupted
 
-| Disruption | What the integration does | You do |
-|---|---|---|
-| PVOutput down, network error, timeout | Statuses stay in the log and are sent oldest first once PVOutput answers again. | Nothing |
-| Hourly request limit reached | Uploading pauses until PVOutput's reset time, then continues where it stopped. The pause survives restarts. | Nothing |
-| **Uploading** switched off | Recording continues; the backlog is sent when it is switched back on. | Nothing |
-| Integration disabled, reloaded or reinstalled while Home Assistant keeps running | The recorder still records the sensors. On start the log is rebuilt from the recorder for the whole missed period (about 2 days of history per minute) and the backlog is sent. The log file survives removing and re-adding the integration. | Nothing |
-| Disrupted for longer than the recorder keeps states (10 days by default) | The rebuilt part ends where the recorder's states end. | **Import history from Home Assistant** fills the rest from hourly long term statistics |
-| PVOutput did not confirm a status (a batch answers `0` for it, or it lacks v1-v4 because IoTaWatt has not created it yet) | Only statuses PVOutput confirms count as sent. The rest are retried in later cycles for two hours. | Nothing |
-| PVOutput rejected a status | It is marked as rejected and shown in **Rejected samples**. | **Reupload history → since the first unsent status** |
-| Backlog older than PVOutput accepts for statuses (14 days, 90 for donors) | Statuses cannot be sent any more. | **Reupload history** sends those days as daily totals; or turn on the daily output fallback to do it automatically |
-| Integration installed after the period you want in PVOutput | — | **Import history from Home Assistant** with *Send to PVOutput* on |
-| Home Assistant itself was off | No sensor values exist for that time anywhere in Home Assistant. Energy counters carry on, so **energy since midnight stays correct**; the energy of the outage is counted in the first interval after the restart. | Nothing |
+**You do nothing** when:
 
-Everything that PVOutput has not confirmed stays in the log, and the **Samples waiting**,
-**Rejected samples** and **Daily outputs waiting** sensors show what is outstanding.
+| Disruption | What happens |
+|---|---|
+| PVOutput down, network error, timeout | Recording continues. The backlog is sent oldest first once PVOutput answers again. |
+| Hourly request limit reached | Uploading pauses until PVOutput's reset time, then continues where it stopped. The pause survives restarts. |
+| **Uploading** switched off | Recording continues. The backlog is sent when it is switched back on. |
+| PVOutput does not confirm a status (a batch answers `0`, or the status lacks v1-v4 because IoTaWatt has not created it yet) | Only statuses PVOutput confirms count as sent; the rest are retried for two hours. |
+| Integration disabled, reloaded or reinstalled while Home Assistant runs, for less time than the recorder keeps states | On start, the log is filled from the recorder for the whole missed period with full 5 minute detail (about 2 days of history per minute), and the backlog is sent. |
+| Home Assistant itself off | No values exist for that time anywhere. Energy counters carry on, so **energy since midnight stays correct**: the energy of the outage is counted in the first interval after the restart. |
+
+**PVOutput's own limit:** it takes statuses only for the last **14 days** (**90** for
+donors). A backlog older than that stays in the log; send it as daily totals with
+**Reupload history**, or turn on the *daily output fallback* setting to do that
+automatically.
+
+**You use the Configure menu** only when:
+
+| Situation | Action |
+|---|---|
+| PVOutput rejected a status (shown in **Rejected samples**) | **Reupload history → since the first unsent status** |
+| You want a period sent again (e.g. a field was made active, or PVOutput data was edited) | **Reupload history → from a date and time** |
+| The integration was not running for longer than the recorder keeps states | **Import history from Home Assistant** fills the rest from hourly statistics (sensors without a `state_class` have none) |
+| You want PVOutput filled for the time before installing | **Import history from Home Assistant** with *Send to PVOutput* on |
+
+The **Samples waiting**, **Rejected samples** and **Daily outputs waiting** sensors show
+what is outstanding at any time.
 
 ## Quick start
 
