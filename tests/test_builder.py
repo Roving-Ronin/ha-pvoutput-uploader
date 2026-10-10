@@ -61,7 +61,7 @@ def test_average_without_values_is_none() -> None:
 def test_last_and_changed() -> None:
     s = series([(0, 1.0), (100, 2.0), (200, None)])
     assert s.last(150) == 2.0
-    assert s.last(250) == 2.0  # unavailable falls back to the last valid value
+    assert s.last(250) is None  # unavailable is not a current reading
     assert s.changed(0, 300)
     assert not s.changed(200, 500)
     assert not s.changed(-100, -1)
@@ -90,6 +90,11 @@ def test_delta_with_unavailable_counter() -> None:
     s = series([(0, 100.0), (100, None), (200, 130.0)], energy=True)
     assert s.delta(0, 300) == pytest.approx(30.0)
     assert series([(0, None)], energy=True).delta(0, 300) is None
+    # Unavailable for a whole slot: a gap, not zero use.
+    gap = series([(0, 100.0), (100, None), (400, 130.0)], energy=True)
+    assert gap.delta(0, 300) is None  # no reading in the slot, unavailable at its end
+    assert gap.delta(300, 350) is None
+    assert gap.delta(350, 600) == pytest.approx(30.0)  # counted when it reports again
 
 
 def test_units() -> None:
@@ -174,10 +179,10 @@ async def test_build_from_states(hass: HomeAssistant) -> None:
     assert by_ts[t0 + 300]["v4"] == 300.0
     assert by_ts[t0 + 600]["v1"] == pytest.approx(10.0)
     assert by_ts[t0 + 600]["v2"] == pytest.approx(300.0)
-    # Unavailable from 1000: only the valid 100 s count, last valid value kept.
+    # Unavailable from 1000: only the valid 100 s count, and no last value.
     assert by_ts[t0 + 1200]["v1"] == pytest.approx(0.0)
     assert by_ts[t0 + 1200]["v2"] == pytest.approx(300.0)
-    assert by_ts[t0 + 1200]["v4"] == 300.0
+    assert by_ts[t0 + 1200]["v4"] is None
 
 
 async def test_build_from_states_without_sources(hass: HomeAssistant) -> None:

@@ -6,6 +6,9 @@
 - **Reupload history** and **Import history from Home Assistant** are in the Configure menu, besides the actions.
 - Reupload starts **since the first unsent status** (waiting, rejected or too old) or **from a date and time**, like IoTaWatt's reload; the action takes `since_failure` or a date or datetime `start`.
 - Integration icon (shown by Home Assistant 2026.3+), entity and action icons.
+- Only statuses PVOutput confirms (`1` in the batch answer) count as sent; unconfirmed ones, and statuses refused with "Missing energy and power values" while another uploader has not created them yet, are retried for two hours.
+- Batches of daily outputs go to `addoutput.jsp` (there is no `addbatchoutput.jsp`).
+- An unavailable sensor leaves a gap: no last value and no energy for a slot without a counter reading, instead of repeating an old reading or logging zero.
 - Tests for the builder, store, API client, uploader, flows, setup and actions; releases now wait for them, hassfest and the HACS checks.
 
 ## 0.0.1b1

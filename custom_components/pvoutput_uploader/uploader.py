@@ -55,7 +55,7 @@ from .const import (
     MAP_NAME,
     MAX_CHUNKS_PER_CYCLE,
     MAX_REQUESTS_PER_CYCLE,
-    MISSING_BASE_RETRY_SECONDS,
+    UNCONFIRMED_RETRY_SECONDS,
     OUTPUT_BATCH_DONOR,
     RATE_RESERVE,
     SETTLE_SECONDS,
@@ -353,19 +353,25 @@ class Uploader:
         single = any(FIELDS_BY_KEY[m.field].battery for m in active)
         per_slot = step // LOG_INTERVAL
 
+        # Statuses PVOutput did not confirm are retried next cycle, not straight away.
+        deferred: set[int] = set()
+
         for _ in range(MAX_REQUESTS_PER_CYCLE):
             if not self._rate_ok():
                 return
             limit = 1 if single else self._batch_limit
             pending = await self._run(
-                self.store.pending_ts, window, last_built, limit * per_slot
+                self.store.pending_ts,
+                window,
+                last_built,
+                (limit + len(deferred)) * per_slot,
             )
             slots: list[int] = []
             for ts in pending:
                 slot = _slot_end(ts, step)
                 if slot > last_built:
                     break
-                if not slots or slots[-1] != slot:
+                if slot not in deferred and (not slots or slots[-1] != slot):
                     slots.append(slot)
             slots = slots[:limit]
             if not slots:
@@ -397,10 +403,12 @@ class Uploader:
                         {"d": local.strftime("%Y%m%d"), "t": local.strftime("%H:%M")}
                         | values
                     )
+                    confirmed = {slot}
                 else:
-                    await self.client.add_batch_status(
+                    answer = await self.client.add_batch_status(
                         [self._batch_line(slot, values) for slot, values in entries]
                     )
+                    confirmed = self._confirmed(answer, [slot for slot, _ in entries])
             except PVOutputRateLimited as err:
                 await self._pause(err.reset, str(err))
                 return
@@ -409,15 +417,36 @@ class Uploader:
                 _LOGGER.error("PVOutput refused the API key: %s", err)
                 return
             except PVOutputBadRequest as err:
-                if not await self._handle_rejected(entries, str(err)):
-                    return
+                await self._handle_rejected(entries, str(err), deferred)
                 continue
 
             for slot, _ in entries:
-                await self._mark_slot(slot, DONE)
-            self.last_upload = dt_util.utcnow()
-            self.last_error = None
+                if slot in confirmed:
+                    await self._mark_slot(slot, DONE)
+                else:
+                    await self._unconfirmed(slot, "PVOutput did not add the status", deferred)
+            if confirmed:
+                self.last_upload = dt_util.utcnow()
+                self.last_error = None
             self._batch_limit = min(self.batch_size, self._batch_limit * 2)
+
+    @staticmethod
+    def _confirmed(answer: str, slots: list[int]) -> set[int]:
+        """Return the slots addbatchstatus.jsp reports as added (status 1).
+
+        The answer holds ``yyyymmdd,hh:mm,status`` per status, separated by ``;``.
+        Status 0 means the status did not add or update any data.
+        """
+        added: set[tuple[str, str]] = set()
+        for item in answer.split(";"):
+            parts = item.strip().split(",")
+            if len(parts) >= 3 and parts[2].strip() == "1":
+                added.add((parts[0].strip(), parts[1].strip()))
+        return {
+            slot
+            for slot in slots
+            if (_local(slot).strftime("%Y%m%d"), _local(slot).strftime("%H:%M")) in added
+        }
 
     def _batch_line(self, slot: int, values: dict[str, str]) -> str:
         local = _local(slot)
@@ -426,23 +455,35 @@ class Uploader:
             cols.pop()
         return ",".join([local.strftime("%Y%m%d"), local.strftime("%H:%M"), *cols])
 
+    async def _unconfirmed(self, slot: int, message: str, deferred: set[int]) -> None:
+        """Retry a status in later cycles, giving up after a while."""
+        if time.time() - slot < UNCONFIRMED_RETRY_SECONDS:
+            deferred.add(slot)
+            self.last_error = f"{_local(slot).isoformat()}: {message}, will retry"
+            return
+        await self._mark_slot(slot, FAILED)
+        self.last_error = f"{_local(slot).isoformat()}: {message}"
+        _LOGGER.warning("PVOutput did not take the status for %s: %s", _local(slot), message)
+
     async def _handle_rejected(
-        self, entries: list[tuple[int, dict[str, str]]], message: str
-    ) -> bool:
-        """Deal with a 400 answer. Return whether to keep going this cycle."""
+        self,
+        entries: list[tuple[int, dict[str, str]]],
+        message: str,
+        deferred: set[int],
+    ) -> None:
+        """Deal with a 400 answer."""
         if len(entries) > 1:
             # Split the batch until the status PVOutput objects to is found.
             self._batch_limit = max(1, len(entries) // 2)
-            return True
+            return
         slot = entries[0][0]
         text = message.lower()
-        if "v1, v2, v3 or v4" in text:
-            # Only extra fields are sent and nobody created the status yet.
-            if time.time() - slot < MISSING_BASE_RETRY_SECONDS:
-                self.last_error = message
-                return False
-            await self._mark_slot(slot, FAILED)
-        elif "older than" in text:
+        if "missing energy and power" in text or "v1, v2, v3 or v4" in text:
+            # Only extra fields are sent and the uploader of v1-v4 (e.g. IoTaWatt)
+            # has not created the status yet.
+            await self._unconfirmed(slot, message, deferred)
+            return
+        if "older than" in text:
             await self._mark_slot(slot, EXPIRED)
             if self.entry.options.get(CONF_OUTPUT_FALLBACK, False):
                 await self._queue_days({_local(slot).strftime("%Y%m%d")})
@@ -450,7 +491,6 @@ class Uploader:
             await self._mark_slot(slot, FAILED)
         self.last_error = f"{_local(slot).isoformat()}: {message}"
         _LOGGER.warning("PVOutput rejected the status for %s: %s", _local(slot), message)
-        return True
 
     async def _mark_slot(self, slot: int, state: int) -> None:
         step = self.upload_interval

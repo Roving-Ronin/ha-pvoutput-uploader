@@ -124,6 +124,7 @@ MAX_CHUNKS_PER_CYCLE: Final = 8
 MAX_REQUESTS_PER_CYCLE: Final = 10
 # Requests kept in hand from the hourly limit.
 RATE_RESERVE: Final = 2
-# A status rejected for lacking v1-v4 is retried this long, waiting for
-# another uploader (e.g. IoTaWatt) to create the status first.
-MISSING_BASE_RETRY_SECONDS: Final = 2 * 3600
+# A status PVOutput did not confirm (batch status 0, or rejected for lacking v1-v4
+# while another uploader such as IoTaWatt has not created it yet) is retried in
+# later cycles for this long before it counts as rejected.
+UNCONFIRMED_RETRY_SECONDS: Final = 2 * 3600

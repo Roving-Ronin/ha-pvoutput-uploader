@@ -121,6 +121,16 @@ async def test_errors(
 async def test_connection_error(
     hass: HomeAssistant, aioclient_mock: AiohttpClientMocker
 ) -> None:
-    aioclient_mock.post(BASE_URL + "addbatchoutput.jsp", exc=TimeoutError())
+    aioclient_mock.post(BASE_URL + "addoutput.jsp", exc=TimeoutError())
     with pytest.raises(PVOutputConnectionError):
         await client(hass).add_batch_output(["20261001,100"])
+
+
+async def test_batch_output_goes_to_addoutput(
+    hass: HomeAssistant, aioclient_mock: AiohttpClientMocker
+) -> None:
+    aioclient_mock.post(BASE_URL + "addoutput.jsp", text="OK 200: Added Output")
+    await client(hass).add_batch_output(["20261001,100", "20261002,200"])
+    method, url, data, _ = aioclient_mock.mock_calls[0]
+    assert str(url) == BASE_URL + "addoutput.jsp"
+    assert data == {"data": "20261001,100;20261002,200"}

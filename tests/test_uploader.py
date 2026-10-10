@@ -61,6 +61,8 @@ class FakeClient:
         self.rate_limit: int | None = None
         self.rate_remaining: int | None = None
         self.rate_reset: float | None = None
+        # Times (hh:mm) addbatchstatus.jsp answers with status 0 for.
+        self.not_added: set[str] = set()
 
     def _check(self, kind: str, payload: Any) -> None:
         if self.fail and (err := self.fail(kind, payload)):
@@ -69,7 +71,11 @@ class FakeClient:
     async def add_batch_status(self, lines: list[str]) -> str:
         self._check("batch", lines)
         self.batches.append(lines)
-        return ""
+        # Like PVOutput: date,time,status per status; 1 added, 0 nothing added.
+        return ";".join(
+            f"{d},{t},{0 if t in self.not_added else 1}"
+            for d, t, *_ in (line.split(",") for line in lines)
+        )
 
     async def add_status(self, params: dict[str, str]) -> str:
         self._check("single", params)
@@ -337,7 +343,7 @@ async def test_missing_base_status_is_retried(
     ts = local_ts(10, 10, 10, 15)
     await add(up, Sample(ts, {"v5": 20.0}), last_built=ts)
     up.client.fail = lambda kind, payload: PVOutputBadRequest(
-        "Bad request 400: The request must send at least one of the parameters v1, v2, v3 or v4"
+        "Bad request 400: Missing energy and power values"
     )
     await up._async_upload_statuses()
     assert (await states(up, 0, 2**40))[ts] == PENDING
@@ -510,3 +516,26 @@ async def test_first_unsent(
         Sample(local_ts(10, 9, 10, 10), {"v2": 1.0}, PENDING),
     )
     assert await up.async_first_unsent() == local_ts(10, 9, 10, 5)
+
+
+async def test_only_confirmed_statuses_count_as_sent(
+    hass: HomeAssistant, tmp_path: Path, now: FrozenDateTimeFactory
+) -> None:
+    up = await make(hass, tmp_path, [field("v2")])
+    times = [local_ts(10, 10, 10, m) for m in (5, 10, 15)]
+    await add(up, *(Sample(t, {"v2": 100.0}) for t in times), last_built=times[-1])
+    up.client.not_added = {"10:10"}
+
+    await up._async_upload_statuses()
+    st = await states(up, 0, 2**40)
+    assert [st[t] for t in times] == [DONE, PENDING, DONE]
+    # Not resent at once in the same cycle.
+    assert len(up.client.batches) == 1
+
+    # Retried in later cycles, then given up on.
+    await up._async_upload_statuses()
+    assert up.client.batches[-1] == ["20261010,10:10,,100"]
+    assert (await states(up, 0, 2**40))[times[1]] == PENDING
+    now.move_to(local_dt(10, 10, 12, 30))
+    await up._async_upload_statuses()
+    assert (await states(up, 0, 2**40))[times[1]] == FAILED

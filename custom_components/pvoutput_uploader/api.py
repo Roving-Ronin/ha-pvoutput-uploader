@@ -139,5 +139,8 @@ class PVOutputClient:
         return await self._request("POST", "addoutput.jsp", params)
 
     async def add_batch_output(self, lines: list[str]) -> str:
-        """Send several daily outputs (donors only)."""
-        return await self._request("POST", "addbatchoutput.jsp", {"data": ";".join(lines)})
+        """Send up to 100 daily outputs in one request (donors only).
+
+        Batches go to addoutput.jsp too, as a ``data`` parameter.
+        """
+        return await self._request("POST", "addoutput.jsp", {"data": ";".join(lines)})

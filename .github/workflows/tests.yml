@@ -42,12 +42,12 @@ jobs:
       - uses: home-assistant/actions/hassfest@master
 
   hacs:
-    # HACS' own checks: repository layout, hacs.json, manifest, and the GitHub
-    # repository description and topics. The brands check is skipped: the
-    # integration has no logo in home-assistant/brands.
+    # HACS' own checks: repository layout, hacs.json, manifest. Skipped: brands (the
+    # icon ships in the integration's brand/ folder, not home-assistant/brands), and
+    # the GitHub description and topics, which only the default HACS list needs.
     runs-on: ubuntu-latest
     steps:
       - uses: hacs/action@main
         with:
           category: integration
-          ignore: brands
+          ignore: brands description topics

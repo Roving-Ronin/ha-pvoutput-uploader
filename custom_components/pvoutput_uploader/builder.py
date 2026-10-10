@@ -127,13 +127,9 @@ class _Series:
         return i < len(self.ts) and self.ts[i] <= b
 
     def last(self, b: float) -> float | None:
-        """Return the latest valid value at or before b."""
+        """Return the value in force at b; None while the sensor is unavailable."""
         i = self._index(b)
-        while i >= 0:
-            if self.vals[i] is not None:
-                return self.vals[i]
-            i -= 1
-        return None
+        return self.vals[i] if i >= 0 else None
 
     def average(self, a: float, b: float) -> float | None:
         """Return the time weighted mean over [a, b)."""
@@ -151,10 +147,19 @@ class _Series:
         return total / covered if covered else None
 
     def delta(self, a: float, b: float) -> float | None:
-        """Return the energy counted over (a, b]."""
+        """Return the energy counted over (a, b].
+
+        None when the counter gave no reading in the slot and is unavailable at
+        its end: that is a gap, not zero use. The energy of the gap is counted
+        when the counter reports again.
+        """
         i, j = self._index(a), self._index(b)
         end = self.acc[j] if j >= 0 else None
         if end is None:
+            return None
+        if self.vals[j] is None and not any(
+            v is not None for v in self.vals[i + 1 : j + 1]
+        ):
             return None
         start = self.acc[i] if i >= 0 else None
         return end - (start or 0.0)
