@@ -65,6 +65,7 @@ def test_pending_mark_and_expire(tmp_path: Path) -> None:
     assert store.expire_before(1500) == []
 
     store.mark_range(1500, 1501, FAILED)
+    assert store.first_unsent() == 1200  # expired counts as unsent
     summary = store.summary()
     assert summary["total"] == 10
     assert summary["pending"] == 5

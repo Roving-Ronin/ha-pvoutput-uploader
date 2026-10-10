@@ -429,7 +429,7 @@ async def test_reupload(
     old = local_ts(9, 1, 10, 0)
     await add(up, Sample(recent, {"v2": 1.0}, DONE), Sample(old, {"v2": 1.0}, DONE))
 
-    result = await up.async_reupload(date(2026, 9, 1), date(2026, 10, 10), "auto")
+    result = await up.async_reupload(local_dt(9, 1), date(2026, 10, 10), "auto")
     # Window: 27 September to 10 October. Before it: 1-26 September as outputs.
     assert result == {"status_days": 14, "output_days": 26}
     st = await states(up, 0, 2**40)
@@ -444,7 +444,7 @@ async def test_reupload_outputs_only_skips_today(
     hass: HomeAssistant, tmp_path: Path, now: FrozenDateTimeFactory
 ) -> None:
     up = await make(hass, tmp_path, [field("v2")])
-    result = await up.async_reupload(date(2026, 10, 8), date(2026, 10, 12), "outputs")
+    result = await up.async_reupload(local_dt(10, 8), date(2026, 10, 12), "outputs")
     assert result["status_days"] == 0
     assert await up._run(up.store.queued_outputs, 100) == ["20261008", "20261009"]
 
@@ -484,3 +484,29 @@ async def test_import_from_recorder(
     ]
     assert rows[0].values["v1"] == pytest.approx(10.0)
     assert {r.uploaded for r in rows} == {DONE}
+
+
+async def test_reupload_from_a_time(
+    hass: HomeAssistant, tmp_path: Path, now: FrozenDateTimeFactory
+) -> None:
+    up = await make(hass, tmp_path, [field("v2")])
+    times = [local_ts(10, 9, 10, m) for m in (0, 5, 10)]
+    await add(up, *(Sample(t, {"v2": 1.0}, DONE) for t in times))
+    result = await up.async_reupload(local_dt(10, 9, 10, 5), date(2026, 10, 10), "statuses")
+    assert result == {"status_days": 2, "output_days": 0}
+    st = await states(up, 0, 2**40)
+    assert [st[t] for t in times] == [DONE, PENDING, PENDING]
+
+
+async def test_first_unsent(
+    hass: HomeAssistant, tmp_path: Path, now: FrozenDateTimeFactory
+) -> None:
+    up = await make(hass, tmp_path, [field("v2")])
+    assert await up.async_first_unsent() is None
+    await add(
+        up,
+        Sample(local_ts(10, 9, 10, 0), {"v2": 1.0}, DONE),
+        Sample(local_ts(10, 9, 10, 5), {"v2": 1.0}, FAILED),
+        Sample(local_ts(10, 9, 10, 10), {"v2": 1.0}, PENDING),
+    )
+    assert await up.async_first_unsent() == local_ts(10, 9, 10, 5)

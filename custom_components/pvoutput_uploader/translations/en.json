@@ -3,10 +3,14 @@
     "step": {
       "user": {
         "title": "PVOutput system",
-        "description": "Enter the API key and system ID from pvoutput.org (Settings). The status interval and donor status are read from your account.",
+        "description": "Enter the API key and system ID from pvoutput.org (Settings → API Settings). The status interval and donor status are read from your account.\n\nAfter setup, open **Configure** to choose which sensors are sent.",
         "data": {
           "api_key": "API key",
           "system_id": "System ID"
+        },
+        "data_description": {
+          "api_key": "Needs write access (API access enabled in PVOutput).",
+          "system_id": "The numeric ID of the system the statuses belong to."
         }
       }
     },
@@ -21,42 +25,64 @@
   "options": {
     "step": {
       "init": {
-        "title": "PVOutput fields",
-        "description": "Account: **{account}**. PVOutput status interval: {detected_interval} min.\n\n{fields}\n\nChanges are kept only after **Save and close**.",
+        "title": "PVOutput Uploader",
+        "description": "Account: **{account}**, PVOutput status interval {detected_interval} min.\n\n**Fields**\n{fields}\n\nAll fields are recorded every 5 minutes into the history log; only **active** ones are sent. **Reupload history** sends recorded days again (e.g. after making a field active); **Import history** fills the log for a time before the integration was installed. Each action saves when you submit it.",
         "menu_options": {
-          "add_sensor": "Add sensor field",
-          "add_constant": "Add constant field",
+          "add_field": "Add field",
           "edit_field": "Edit field",
           "remove_field": "Remove fields",
-          "settings": "Settings",
-          "save": "Save and close"
+          "reupload": "Reupload history",
+          "import_history": "Import history from Home Assistant",
+          "settings": "Settings"
+        }
+      },
+      "add_field": {
+        "title": "Add field",
+        "description": "Where does the value come from?\n\n- **A sensor**: a Home Assistant sensor, recorded every 5 minutes, e.g. a temperature or battery power.\n- **A fixed value**: the same number in every status, e.g. the battery size (b3).",
+        "menu_options": {
+          "add_sensor": "A sensor",
+          "add_constant": "A fixed value"
         }
       },
       "add_sensor": {
         "title": "Add sensor field",
-        "description": "Pick a sensor and the PVOutput field it feeds. Only fields not yet used and available to your account type are listed.",
+        "description": "Pick the sensor and the PVOutput field it fills. Only fields not used yet are listed; extended (v7-v12) and battery (b1-b6) fields need a donor account.",
         "data": {
           "entity_id": "Sensor",
           "field": "PVOutput field"
+        },
+        "data_description": {
+          "entity_id": "Its unit is converted for PVOutput (kWh to Wh, kW to W, °F to °C).",
+          "field": "v1/v3 energy, v2/v4 power, v5 temperature, v6 voltage, v7-v12 extended, b1-b6 battery."
         }
       },
       "sensor_details": {
         "title": "{field}",
-        "description": "From `{entity}`. Name the field as it is labelled in PVOutput. Passive fields are recorded in the history log but not sent; make them active later and use the reupload action to send their history.",
+        "description": "From `{entity}`.",
         "data": {
           "name": "Name in PVOutput",
-          "active": "Active (send to PVOutput)",
-          "aggregate": "Value per interval"
+          "active": "Active",
+          "aggregate": "Value sent for each interval"
+        },
+        "data_description": {
+          "name": "For your reference; use the label the field has in PVOutput.",
+          "active": "Off (passive): recorded in the history log but not sent. Make it active later and reupload to send its history.",
+          "aggregate": "How the 5 minute values of an interval are combined. Energy since midnight needs an energy sensor (Wh/kWh); lifetime and daily counters both work."
         }
       },
       "add_constant": {
-        "title": "Add constant field",
-        "description": "A fixed value sent with every status, for example the battery size (b3). It is not recorded in the history log and never makes a status on its own.",
+        "title": "Add fixed value",
+        "description": "Sent with every status. It is not recorded, and never sends a status on its own.",
         "data": {
           "field": "PVOutput field",
           "constant": "Value",
           "name": "Name in PVOutput",
-          "active": "Active (send to PVOutput)"
+          "active": "Active"
+        },
+        "data_description": {
+          "constant": "In PVOutput's unit for the field, e.g. Wh for battery size.",
+          "name": "Optional; defaults to PVOutput's name for the field.",
+          "active": "Off: kept in the configuration but not sent."
         }
       },
       "edit_field": {
@@ -67,38 +93,83 @@
       },
       "edit_details": {
         "title": "{field}",
+        "description": "Changes apply to new values; recorded history keeps what was logged.",
         "data": {
           "entity_id": "Sensor",
           "constant": "Value",
           "name": "Name in PVOutput",
-          "active": "Active (send to PVOutput)",
-          "aggregate": "Value per interval"
+          "active": "Active",
+          "aggregate": "Value sent for each interval"
+        },
+        "data_description": {
+          "active": "Off (passive): recorded but not sent.",
+          "aggregate": "How the 5 minute values of an interval are combined."
         }
       },
       "remove_field": {
         "title": "Remove fields",
-        "description": "Recorded history of removed fields stays in the log.",
+        "description": "Removed fields stop being recorded and sent. What was recorded stays in the log.",
         "data": {
           "fields": "Fields to remove"
         }
       },
+      "reupload": {
+        "title": "Reupload history",
+        "description": "Waiting to be sent: {pending} samples. Rejected by PVOutput: {failed}. Too old to send as statuses: {expired}. First unsent: **{first_unsent}**.\n\nStatuses that could not be sent (uploading switched off, PVOutput or network errors, rate limit) are sent automatically when uploading can continue. Use this to send again what PVOutput rejected, or any period from a chosen time, like IoTaWatt's reload.\n\nSending runs in the background at the pace PVOutput's hourly request limit allows. Statuses can be sent for the last {status_days} days; older days only as daily totals (energy, peak power, min/max temperature).",
+        "data": {
+          "from": "Start",
+          "start": "Date and time",
+          "end": "To",
+          "method": "Send as"
+        },
+        "data_description": {
+          "start": "Used with \"From a date and time\".",
+          "end": "Last day to send. Defaults to today.",
+          "method": "Statuses keep every interval; daily totals replace the day's totals in PVOutput."
+        }
+      },
+      "import_history": {
+        "title": "Import history from Home Assistant",
+        "description": "Fills the history log from Home Assistant's recorder: 5 minute detail where recorded states still exist (10 days by default), hourly statistics before that. Only sensor fields are imported.",
+        "data": {
+          "start": "From",
+          "end": "To",
+          "overwrite": "Replace recorded values",
+          "upload": "Send to PVOutput"
+        },
+        "data_description": {
+          "end": "Defaults to now.",
+          "overwrite": "Off: periods already in the log are kept. On: they are rebuilt from recorded states.",
+          "upload": "Off: only stored in the log, ready for a later reupload. On: sent like any backlog (statuses within the PVOutput window)."
+        }
+      },
       "settings": {
         "title": "Settings",
+        "description": "PVOutput reports: {detected_account} account, {detected_interval} minute status interval.",
         "data": {
           "donor_mode": "Account type",
           "upload_interval": "Upload interval",
           "retention_days": "Keep history for",
-          "output_fallback": "Send daily outputs for statuses too old to upload"
+          "output_fallback": "Send daily totals for statuses too old to upload"
         },
         "data_description": {
           "donor_mode": "Donor accounts can send extended (v7-v12) and battery fields, upload 90 days back and 100 statuses per request.",
           "upload_interval": "Should match the status interval of the system in PVOutput. The history log always records 5 minute values.",
-          "output_fallback": "When statuses could not be sent in time (for example after a long outage), send that day's totals as a daily output instead."
+          "retention_days": "Older rows of the history log are deleted once a day.",
+          "output_fallback": "When statuses could not be sent in time (e.g. after a long outage), send that day's totals as a daily output instead. This replaces the day's totals in PVOutput."
         }
       }
     },
     "error": {
-      "unit_mismatch": "The sensor's unit does not fit this field."
+      "unit_mismatch": "The sensor's unit does not fit this field.",
+      "end_before_start": "The end must be after the start.",
+      "nothing_unsent": "Everything recorded has been sent. Choose a date and time instead.",
+      "start_required": "Enter the date and time to start from."
+    },
+    "abort": {
+      "not_loaded": "The integration is not running. Check that it has started, then try again.",
+      "reupload_queued": "Queued: {status_days} days as statuses, {output_days} days as daily totals. Progress shows in the Samples waiting and Daily outputs waiting sensors.",
+      "import_done": "Imported {from_states} samples from recorded states and {from_statistics} from statistics."
     }
   },
   "selector": {
@@ -106,7 +177,7 @@
       "options": {
         "average": "Average over the interval",
         "last": "Last value",
-        "energy_today": "Energy since midnight (from an energy sensor)"
+        "energy_today": "Energy since midnight"
       }
     },
     "donor_mode": {
@@ -116,11 +187,17 @@
         "standard": "Standard"
       }
     },
+    "reupload_from": {
+      "options": {
+        "since_failure": "Since the first unsent status (waiting, rejected or too old)",
+        "from_time": "From a date and time"
+      }
+    },
     "reupload_method": {
       "options": {
-        "auto": "Statuses where allowed, daily outputs for older days",
+        "auto": "Statuses where allowed, daily totals for older days",
         "statuses": "Statuses only",
-        "outputs": "Daily outputs only"
+        "outputs": "Daily totals only"
       }
     }
   },
@@ -150,22 +227,26 @@
     },
     "end_before_start": {
       "message": "The end must be after the start."
+    },
+    "start_required": {
+      "message": "Give a start, or set since_failure."
     }
   },
   "services": {
     "reupload": {
       "name": "Reupload history",
-      "description": "Sends recorded history again. Days inside PVOutput's status window (14 days, 90 for donors) are sent as statuses, older days as daily outputs.",
+      "description": "Sends recorded history again. Days inside PVOutput's status window (14 days, 90 for donors) are sent as statuses, older days as daily outputs. Also available under Configure.",
       "fields": {
         "config_entry_id": { "name": "PVOutput system", "description": "Needed only when more than one system is set up." },
-        "start": { "name": "Start date", "description": "First day to send." },
+        "since_failure": { "name": "Since first unsent", "description": "Start at the oldest status not confirmed by PVOutput (waiting, rejected or too old). Replaces the start." },
+        "start": { "name": "Start", "description": "Date, or date and time, to send from." },
         "end": { "name": "End date", "description": "Last day to send. Defaults to today." },
         "method": { "name": "Method", "description": "How the days are sent." }
       }
     },
     "import_from_recorder": {
       "name": "Import from recorder",
-      "description": "Fills the history log from Home Assistant's recorded states, and from hourly long term statistics where states have been purged.",
+      "description": "Fills the history log from Home Assistant's recorded states, and from hourly long term statistics where states have been purged. Also available under Configure.",
       "fields": {
         "config_entry_id": { "name": "PVOutput system", "description": "Needed only when more than one system is set up." },
         "start": { "name": "Start", "description": "Start of the period to import." },

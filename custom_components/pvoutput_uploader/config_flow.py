@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 from copy import deepcopy
+from datetime import date, datetime, timedelta
 from typing import Any
 
 import voluptuous as vol
 
 from homeassistant.config_entries import (
     ConfigEntry,
+    ConfigEntryState,
     ConfigFlow,
     ConfigFlowResult,
     OptionsFlow,
@@ -18,6 +20,8 @@ from homeassistant.core import callback
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.selector import (
     BooleanSelector,
+    DateSelector,
+    DateTimeSelector,
     EntitySelector,
     EntitySelectorConfig,
     NumberSelector,
@@ -29,6 +33,7 @@ from homeassistant.helpers.selector import (
     SelectSelectorMode,
     TextSelector,
 )
+from homeassistant.util import dt as dt_util
 
 from .api import PVOutputAuthError, PVOutputClient, PVOutputError
 from .builder import unit_supported
@@ -50,6 +55,7 @@ from .const import (
     DONOR_NO,
     DONOR_YES,
     FIELD_CATALOG,
+    FIELD_KEYS,
     FIELDS_BY_KEY,
     INTERVAL_AUTO,
     KIND_ENERGY,
@@ -61,6 +67,18 @@ from .const import (
     MAP_NAME,
     UPLOAD_INTERVALS,
 )
+from .services import (
+    ATTR_END,
+    ATTR_METHOD,
+    ATTR_OVERWRITE,
+    ATTR_START,
+    ATTR_UPLOAD,
+)
+from .uploader import REUPLOAD_AUTO, REUPLOAD_OUTPUTS, REUPLOAD_STATUSES, Uploader
+
+ATTR_FROM = "from"
+FROM_FAILURE = "since_failure"
+FROM_TIME = "from_time"
 
 ENTITY_SELECTOR = EntitySelector(EntitySelectorConfig(domain=["sensor", "input_number"]))
 CONSTANT_SELECTOR = NumberSelector(
@@ -130,7 +148,10 @@ class PVOutputUploaderConfigFlow(ConfigFlow, domain=DOMAIN):
 
 
 class PVOutputUploaderOptionsFlow(OptionsFlow):
-    """Field mappings and upload settings, edited from a menu."""
+    """Fields, history actions and settings, picked from a menu.
+
+    Every action saves and closes as soon as it is submitted.
+    """
 
     def __init__(self) -> None:
         """Initialize the flow."""
@@ -157,28 +178,9 @@ class PVOutputUploaderOptionsFlow(OptionsFlow):
             for k in keys
         ]
 
-    def _describe(self) -> str:
-        donor = self._donor()
-        lines = []
-        for m in sorted(self._fields, key=lambda m: list(FIELDS_BY_KEY).index(m[MAP_FIELD])):
-            field = FIELDS_BY_KEY[m[MAP_FIELD]]
-            source = m.get(MAP_ENTITY) or f"constant {m.get(MAP_CONSTANT)}"
-            state = "active" if m.get(MAP_ACTIVE, True) else "passive"
-            if field.donor and not donor:
-                state += ", needs donor so not sent"
-            aggregate = m.get(MAP_AGGREGATE) or field.default_aggregate
-            lines.append(
-                f"- **{field.key}** {m.get(MAP_NAME) or field.name}: "
-                f"`{source}` ({aggregate}, {state})"
-            )
-        return "\n".join(lines) or "No fields yet."
-
-    def _unit_error(self, field: str, entity_id: str, aggregate: str) -> str | None:
-        """Return an error key if the sensor's unit does not fit the field."""
-        kind = KIND_ENERGY if aggregate == AGG_ENERGY_TODAY else FIELDS_BY_KEY[field].kind
-        state = self.hass.states.get(entity_id)
-        unit = state.attributes.get(ATTR_UNIT_OF_MEASUREMENT) if state else None
-        return None if unit_supported(kind, unit) else "unit_mismatch"
+    def _used_fields(self) -> list[str]:
+        used = {m[MAP_FIELD] for m in self._fields}
+        return [f.key for f in FIELD_CATALOG if f.key in used]
 
     def _free_fields(self) -> list[str]:
         """Return the fields not used yet that the account may send."""
@@ -186,12 +188,34 @@ class PVOutputUploaderOptionsFlow(OptionsFlow):
         donor = self._donor()
         return [f.key for f in FIELD_CATALOG if f.key not in used and (donor or not f.donor)]
 
-    def _field_selector(self, keys: list[str]) -> SelectSelector:
+    def _field_selector(self, keys: list[str], mode: SelectSelectorMode) -> SelectSelector:
         return SelectSelector(
-            SelectSelectorConfig(
-                options=self._field_options(keys), mode=SelectSelectorMode.DROPDOWN
-            )
+            SelectSelectorConfig(options=self._field_options(keys), mode=mode)
         )
+
+    def _describe(self) -> str:
+        donor = self._donor()
+        lines = []
+        for m in sorted(self._fields, key=lambda m: FIELD_KEYS.index(m[MAP_FIELD])):
+            field = FIELDS_BY_KEY[m[MAP_FIELD]]
+            if m.get(MAP_ENTITY):
+                source = f"`{m[MAP_ENTITY]}`, {m.get(MAP_AGGREGATE) or field.default_aggregate}"
+            else:
+                source = f"constant {m.get(MAP_CONSTANT)}"
+            state = "active" if m.get(MAP_ACTIVE, True) else "passive"
+            if field.donor and not donor:
+                state += ", needs a donor account so not sent"
+            lines.append(
+                f"- **{field.key}** {m.get(MAP_NAME) or field.name}: {source} ({state})"
+            )
+        return "\n".join(lines) or "_No fields yet. Start with **Add field**._"
+
+    def _unit_error(self, field: str, entity_id: str, aggregate: str) -> str | None:
+        """Return an error key if the sensor's unit does not fit the field."""
+        kind = KIND_ENERGY if aggregate == AGG_ENERGY_TODAY else FIELDS_BY_KEY[field].kind
+        state = self.hass.states.get(entity_id)
+        unit = state.attributes.get(ATTR_UNIT_OF_MEASUREMENT) if state else None
+        return None if unit_supported(kind, unit) else "unit_mismatch"
 
     def _details_schema(self, field: str, has_entity: bool) -> dict[Any, Any]:
         """Name, active flag and, for sensors, how values are combined."""
@@ -209,18 +233,25 @@ class PVOutputUploaderOptionsFlow(OptionsFlow):
             )
         return schema
 
+    def _save(self) -> ConfigFlowResult:
+        return self.async_create_entry(data=self._options)
+
+    def _uploader(self) -> Uploader | None:
+        if self.config_entry.state is not ConfigEntryState.LOADED:
+            return None
+        return self.config_entry.runtime_data.uploader
+
     async def async_step_init(
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
         """Show the main menu."""
-        if not self._options:
-            self._options = deepcopy(DEFAULT_OPTIONS) | deepcopy(dict(self.config_entry.options))
+        self._options = deepcopy(DEFAULT_OPTIONS) | deepcopy(dict(self.config_entry.options))
         menu = []
         if self._free_fields():
-            menu += ["add_sensor", "add_constant"]
+            menu.append("add_field")
         if self._fields:
             menu += ["edit_field", "remove_field"]
-        menu += ["settings", "save"]
+        menu += ["reupload", "import_history", "settings"]
         detected = self.config_entry.data.get(CONF_DETECTED_INTERVAL, DEFAULT_INTERVAL_MINUTES)
         return self.async_show_menu(
             step_id="init",
@@ -233,6 +264,14 @@ class PVOutputUploaderOptionsFlow(OptionsFlow):
         )
 
     # Add
+
+    async def async_step_add_field(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Choose where the value comes from."""
+        return self.async_show_menu(
+            step_id="add_field", menu_options=["add_sensor", "add_constant"]
+        )
 
     async def async_step_add_sensor(
         self, user_input: dict[str, Any] | None = None
@@ -251,7 +290,9 @@ class PVOutputUploaderOptionsFlow(OptionsFlow):
         schema = vol.Schema(
             {
                 vol.Required(MAP_ENTITY): ENTITY_SELECTOR,
-                vol.Required(MAP_FIELD): self._field_selector(self._free_fields()),
+                vol.Required(MAP_FIELD): self._field_selector(
+                    self._free_fields(), SelectSelectorMode.DROPDOWN
+                ),
             }
         )
         return self.async_show_form(
@@ -280,8 +321,7 @@ class PVOutputUploaderOptionsFlow(OptionsFlow):
                         MAP_AGGREGATE: aggregate,
                     }
                 )
-                self._new = {}
-                return await self.async_step_init()
+                return self._save()
         defaults = user_input or {
             MAP_NAME: fdef.name,
             MAP_ACTIVE: True,
@@ -315,10 +355,12 @@ class PVOutputUploaderOptionsFlow(OptionsFlow):
                     MAP_AGGREGATE: FIELDS_BY_KEY[field].default_aggregate,
                 }
             )
-            return await self.async_step_init()
+            return self._save()
         schema = vol.Schema(
             {
-                vol.Required(MAP_FIELD): self._field_selector(self._free_fields()),
+                vol.Required(MAP_FIELD): self._field_selector(
+                    self._free_fields(), SelectSelectorMode.DROPDOWN
+                ),
                 vol.Required(MAP_CONSTANT): CONSTANT_SELECTOR,
                 vol.Optional(MAP_NAME): TextSelector(),
                 vol.Required(MAP_ACTIVE, default=True): BooleanSelector(),
@@ -326,7 +368,7 @@ class PVOutputUploaderOptionsFlow(OptionsFlow):
         )
         return self.async_show_form(step_id="add_constant", data_schema=schema)
 
-    # Edit
+    # Edit and remove
 
     async def async_step_edit_field(
         self, user_input: dict[str, Any] | None = None
@@ -339,13 +381,8 @@ class PVOutputUploaderOptionsFlow(OptionsFlow):
             step_id="edit_field",
             data_schema=vol.Schema(
                 {
-                    vol.Required(MAP_FIELD): SelectSelector(
-                        SelectSelectorConfig(
-                            options=self._field_options(
-                                [f.key for f in FIELD_CATALOG if f.key in {m[MAP_FIELD] for m in self._fields}]
-                            ),
-                            mode=SelectSelectorMode.LIST,
-                        )
+                    vol.Required(MAP_FIELD): self._field_selector(
+                        self._used_fields(), SelectSelectorMode.LIST
                     )
                 }
             ),
@@ -381,8 +418,7 @@ class PVOutputUploaderOptionsFlow(OptionsFlow):
                     mapping[MAP_ENTITY] = user_input[MAP_ENTITY]
                 else:
                     mapping[MAP_CONSTANT] = user_input[MAP_CONSTANT]
-                self._edit_field = None
-                return await self.async_step_init()
+                return self._save()
         source: dict[Any, Any] = (
             {vol.Required(MAP_ENTITY): ENTITY_SELECTOR}
             if is_sensor
@@ -399,8 +435,6 @@ class PVOutputUploaderOptionsFlow(OptionsFlow):
             errors=errors,
         )
 
-    # Remove
-
     async def async_step_remove_field(
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
@@ -408,16 +442,14 @@ class PVOutputUploaderOptionsFlow(OptionsFlow):
         if user_input is not None:
             drop = set(user_input[CONF_FIELDS])
             self._options[CONF_FIELDS] = [m for m in self._fields if m[MAP_FIELD] not in drop]
-            return await self.async_step_init()
+            return self._save()
         return self.async_show_form(
             step_id="remove_field",
             data_schema=vol.Schema(
                 {
                     vol.Required(CONF_FIELDS, default=[]): SelectSelector(
                         SelectSelectorConfig(
-                            options=self._field_options(
-                                [f.key for f in FIELD_CATALOG if f.key in {m[MAP_FIELD] for m in self._fields}]
-                            ),
+                            options=self._field_options(self._used_fields()),
                             multiple=True,
                             mode=SelectSelectorMode.LIST,
                         )
@@ -426,7 +458,127 @@ class PVOutputUploaderOptionsFlow(OptionsFlow):
             ),
         )
 
-    # Settings and save
+    # History
+
+    async def async_step_reupload(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Send the history log again, since the first failure or from a time."""
+        if (uploader := self._uploader()) is None:
+            return self.async_abort(reason="not_loaded")
+        errors: dict[str, str] = {}
+        today = dt_util.now().date()
+        first_unsent = await uploader.async_first_unsent()
+        if user_input is not None:
+            end = date.fromisoformat(user_input.get(ATTR_END) or today.isoformat())
+            start: datetime | None = None
+            if user_input[ATTR_FROM] == FROM_FAILURE:
+                if first_unsent is None:
+                    errors["base"] = "nothing_unsent"
+                else:
+                    start = dt_util.as_local(dt_util.utc_from_timestamp(first_unsent))
+            elif not user_input.get(ATTR_START):
+                errors[ATTR_START] = "start_required"
+            else:
+                start = _local_datetime(user_input[ATTR_START])
+            if start is not None and end < start.date():
+                errors["base"] = "end_before_start"
+            if start is not None and not errors:
+                result = await uploader.async_reupload(start, end, user_input[ATTR_METHOD])
+                await self.config_entry.runtime_data.async_request_refresh()
+                return self.async_abort(
+                    reason="reupload_queued",
+                    description_placeholders={
+                        "status_days": str(result["status_days"]),
+                        "output_days": str(result["output_days"]),
+                    },
+                )
+        schema = vol.Schema(
+            {
+                vol.Required(ATTR_FROM): SelectSelector(
+                    SelectSelectorConfig(
+                        options=[FROM_FAILURE, FROM_TIME],
+                        translation_key="reupload_from",
+                        mode=SelectSelectorMode.LIST,
+                    )
+                ),
+                vol.Optional(ATTR_START): DateTimeSelector(),
+                vol.Optional(ATTR_END): DateSelector(),
+                vol.Required(ATTR_METHOD): SelectSelector(
+                    SelectSelectorConfig(
+                        options=[REUPLOAD_AUTO, REUPLOAD_STATUSES, REUPLOAD_OUTPUTS],
+                        translation_key="reupload_method",
+                    )
+                ),
+            }
+        )
+        defaults = user_input or {
+            ATTR_FROM: FROM_FAILURE if first_unsent is not None else FROM_TIME,
+            ATTR_START: (today - timedelta(days=1)).strftime("%Y-%m-%d 00:00:00"),
+            ATTR_END: today.isoformat(),
+            ATTR_METHOD: REUPLOAD_AUTO,
+        }
+        summary = uploader.summary
+        return self.async_show_form(
+            step_id="reupload",
+            data_schema=self.add_suggested_values_to_schema(schema, defaults),
+            description_placeholders={
+                "status_days": str(uploader.status_days),
+                "first_unsent": dt_util.as_local(
+                    dt_util.utc_from_timestamp(first_unsent)
+                ).strftime("%Y-%m-%d %H:%M")
+                if first_unsent is not None
+                else "none, everything recorded was sent",
+                "pending": str(summary.get("pending", 0)),
+                "failed": str(summary.get("failed", 0)),
+                "expired": str(summary.get("expired", 0)),
+            },
+            errors=errors,
+        )
+
+    async def async_step_import_history(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Fill the history log from Home Assistant's recorder."""
+        if (uploader := self._uploader()) is None:
+            return self.async_abort(reason="not_loaded")
+        errors: dict[str, str] = {}
+        now = dt_util.now()
+        if user_input is not None:
+            start = _local_datetime(user_input[ATTR_START])
+            end = _local_datetime(user_input[ATTR_END]) if user_input.get(ATTR_END) else now
+            if end <= start:
+                errors["base"] = "end_before_start"
+            else:
+                result = await uploader.async_import(
+                    start, end, user_input[ATTR_OVERWRITE], user_input[ATTR_UPLOAD]
+                )
+                await self.config_entry.runtime_data.async_request_refresh()
+                return self.async_abort(
+                    reason="import_done",
+                    description_placeholders={
+                        "from_states": str(result["from_states"]),
+                        "from_statistics": str(result["from_statistics"]),
+                    },
+                )
+        schema = vol.Schema(
+            {
+                vol.Required(ATTR_START): DateTimeSelector(),
+                vol.Optional(ATTR_END): DateTimeSelector(),
+                vol.Required(ATTR_OVERWRITE, default=False): BooleanSelector(),
+                vol.Required(ATTR_UPLOAD, default=False): BooleanSelector(),
+            }
+        )
+        defaults = user_input or {
+            ATTR_START: (now - timedelta(days=7)).strftime("%Y-%m-%d 00:00:00"),
+        }
+        return self.async_show_form(
+            step_id="import_history",
+            data_schema=self.add_suggested_values_to_schema(schema, defaults),
+            errors=errors,
+        )
+
+    # Settings
 
     async def async_step_settings(
         self, user_input: dict[str, Any] | None = None
@@ -435,7 +587,7 @@ class PVOutputUploaderOptionsFlow(OptionsFlow):
         if user_input is not None:
             user_input[CONF_RETENTION_DAYS] = int(user_input[CONF_RETENTION_DAYS])
             self._options.update(user_input)
-            return await self.async_step_init()
+            return self._save()
         schema = vol.Schema(
             {
                 vol.Required(CONF_DONOR_MODE): SelectSelector(
@@ -469,10 +621,20 @@ class PVOutputUploaderOptionsFlow(OptionsFlow):
         return self.async_show_form(
             step_id="settings",
             data_schema=self.add_suggested_values_to_schema(schema, current),
+            description_placeholders={
+                "detected_interval": str(
+                    self.config_entry.data.get(CONF_DETECTED_INTERVAL, DEFAULT_INTERVAL_MINUTES)
+                ),
+                "detected_account": "donor"
+                if self.config_entry.data.get(CONF_DETECTED_DONOR)
+                else "standard",
+            },
         )
 
-    async def async_step_save(
-        self, user_input: dict[str, Any] | None = None
-    ) -> ConfigFlowResult:
-        """Store the options."""
-        return self.async_create_entry(data=self._options)
+
+def _local_datetime(value: str) -> datetime:
+    """Parse a datetime selector value as local time."""
+    parsed = dt_util.parse_datetime(value)
+    if parsed is None:
+        raise vol.Invalid(f"Invalid date and time: {value}")
+    return parsed if parsed.tzinfo else parsed.replace(tzinfo=dt_util.get_default_time_zone())

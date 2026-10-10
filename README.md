@@ -1,3 +1,5 @@
+<img src="docs/images/icon.svg" alt="" width="96" align="right">
+
 # PVOutput Uploader for Home Assistant
 
 Sends Home Assistant sensors to [PVOutput](https://pvoutput.org) and keeps its own
@@ -23,20 +25,26 @@ handling, and reloading history from a chosen date.
 - **Battery fields** are not accepted by PVOutput's batch service, so while any battery
   field is active every status is sent with its own `addstatus` request.
 
-## Fields
+## Configure menu
 
-Fields are added one at a time under **Settings → Devices & services → PVOutput
-Uploader → Configure**, then **Save and close**:
+Everything is under **Settings → Devices & services → PVOutput Uploader → Configure**.
+Each action saves as soon as it is submitted.
 
-- **Add sensor field**: pick a sensor and the PVOutput field it feeds (only unused fields
-  that the account type allows are offered), then give it the name used in PVOutput,
-  choose whether it is **active**, and for fields that allow it, how the 5 minute values
-  are combined: average, last value, or energy since midnight.
-- **Add constant field**: a fixed value sent with every status, e.g. the battery size for
-  `b3`. Constants are not logged and never make a status on their own.
+- **Add field**: first choose where the value comes from:
+  - **A sensor**: pick the sensor and the PVOutput field it fills (only fields not used
+    yet, and donor fields only for donor accounts). Then name it as in PVOutput, choose
+    whether it is **active**, and, where a field allows it, how the 5 minute values of an
+    interval are combined: average, last value, or energy since midnight.
+  - **A fixed value**: the same number in every status, e.g. the battery size for `b3`.
+    It is not logged and never sends a status on its own.
+- **Edit field** / **Remove fields**.
+- **Reupload history**: sends a date range of the log again (see below).
+- **Import history from Home Assistant**: fills the log for a time before the integration
+  was installed (see below).
+- **Settings**: account type, upload interval, history retention, daily output fallback.
 
 **Passive** fields are recorded in the log but not sent. Make one active later and
-run `pvoutput_uploader.reupload` to send its history.
+reupload to send its history.
 
 Only active fields are sent; everything else is left empty. This lets the integration
 add values (temperature, extended, battery) to statuses that another uploader such as
@@ -55,21 +63,32 @@ fields is retried for up to two hours, waiting for the other uploader to create 
 Sensor units are converted (kWh to Wh, kW to W, °F to °C, ...). Sensors must be
 recorded by the HA recorder.
 
-## Actions
+## Reupload and import
 
-### `pvoutput_uploader.reupload`
+Statuses that could not be sent (uploading switched off, PVOutput or network errors,
+rate limit) stay in the log and are sent automatically, oldest first, when uploading can
+continue. Statuses PVOutput rejected are not retried on their own.
 
-Sends history from the log again from `start` to `end` (default today).
+**Reupload history** (Configure menu, or the `pvoutput_uploader.reupload` action for
+scripts and automations) sends the active fields again, in the background, as fast as
+PVOutput's hourly request limit allows. Like IoTaWatt's reload, it starts either
+**since the first unsent status** (the oldest one waiting, rejected or too old;
+`since_failure: true` in the action) or **from a date and time** you choose, up to an end
+day (default today), sent as:
 
-- `auto`: days inside PVOutput's status window as statuses, older days as daily outputs
-- `statuses`: only the days still inside the status window
-- `outputs`: daily outputs only (generation, consumption, peak power, min/max temperature)
+- *Statuses where allowed, daily totals for older days* (default): days inside PVOutput's
+  status window (14 days, 90 for donors) as statuses, older days as daily outputs
+- *Statuses only*: only the days still inside the status window
+- *Daily totals only*: daily outputs (generation, consumption, peak power, min/max
+  temperature); these replace the day's totals in PVOutput
 
-### `pvoutput_uploader.import_from_recorder`
+The **Samples waiting** and **Daily outputs waiting** sensors show the progress.
 
-Fills the log for a past period, e.g. right after installing. Recorded states are used
-where they still exist (10 days by default), hourly long term statistics before that
-(split evenly into 5 minute rows). With `upload` off the rows are only stored; with it
+**Import history from Home Assistant** (Configure menu, or the
+`pvoutput_uploader.import_from_recorder` action) fills the log for a past period, e.g.
+right after installing. Recorded states are used where they still exist (10 days by
+default), hourly long term statistics before that (split evenly into 5 minute rows).
+With *Send to PVOutput* off the rows are only stored, ready for a later reupload; with it
 on they are sent like any other backlog.
 
 ## Entities
@@ -103,3 +122,7 @@ Releasing: bump `version` in `manifest.json`, add a `## <version>` section to
 `CHANGELOG.md` and push to `main`. When the tests, hassfest and the HACS checks pass,
 the release workflow tags `v<version>` and publishes a GitHub release (a pre-release
 for versions such as `0.0.1b1`).
+
+The icon's source is [`docs/images/icon.svg`](docs/images/icon.svg); the PNGs in
+`custom_components/pvoutput_uploader/brand/` (256 and 512 px) are rendered from it.
+Home Assistant 2026.3+ shows them in place of the brands repository.

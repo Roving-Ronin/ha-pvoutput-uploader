@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <!-- PVOutput Uploader: a solar panel under the sun, with an upload badge. -->
+  <defs>
+    <linearGradient id="panel" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#3b82f6"/>
+      <stop offset="1" stop-color="#1e3a8a"/>
+    </linearGradient>
+  </defs>
+  <g stroke="#f59e0b" stroke-width="20" stroke-linecap="round">
+    <path d="M150 22 V48 M150 232 V258 M32 140 H58 M242 140 H268
+             M66.6 56.6 L85 75 M215 205 L233.4 223.4 M66.6 223.4 L85 205 M215 75 L233.4 56.6"/>
+  </g>
+  <circle cx="150" cy="140" r="66" fill="#fbbf24"/>
+  <path fill="url(#panel)" stroke="#1e3a8a" stroke-width="10" stroke-linejoin="round"
+        d="M150 236 H420 L476 452 H36 Z"/>
+  <g stroke="#fff" stroke-width="9" stroke-linecap="round" opacity="0.85">
+    <path d="M240 236 L183 452 M330 236 L329 452 M93 344 H448"/>
+  </g>
+  <circle cx="404" cy="404" r="88" fill="#16a34a" stroke="#fff" stroke-width="14"/>
+  <path d="M404 452 V362 M366 398 L404 360 L442 398" fill="none" stroke="#fff"
+        stroke-width="24" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>

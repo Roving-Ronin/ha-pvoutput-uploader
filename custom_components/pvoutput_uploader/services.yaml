@@ -4,10 +4,13 @@ reupload:
       selector:
         config_entry:
           integration: pvoutput_uploader
-    start:
-      required: true
+    since_failure:
+      default: false
       selector:
-        date:
+        boolean:
+    start:
+      selector:
+        datetime:
     end:
       selector:
         date:

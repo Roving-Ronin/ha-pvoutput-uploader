@@ -28,6 +28,7 @@ ATTR_END = "end"
 ATTR_METHOD = "method"
 ATTR_OVERWRITE = "overwrite"
 ATTR_UPLOAD = "upload"
+ATTR_SINCE_FAILURE = "since_failure"
 
 SERVICE_REUPLOAD = "reupload"
 SERVICE_IMPORT = "import_from_recorder"
@@ -35,7 +36,8 @@ SERVICE_IMPORT = "import_from_recorder"
 REUPLOAD_SCHEMA = vol.Schema(
     {
         vol.Optional(ATTR_CONFIG_ENTRY_ID): cv.string,
-        vol.Required(ATTR_START): cv.date,
+        vol.Optional(ATTR_START): vol.Any(cv.date, cv.datetime),
+        vol.Optional(ATTR_SINCE_FAILURE, default=False): cv.boolean,
         vol.Optional(ATTR_END): cv.date,
         vol.Optional(ATTR_METHOD, default=REUPLOAD_AUTO): vol.In(
             [REUPLOAD_AUTO, REUPLOAD_STATUSES, REUPLOAD_OUTPUTS]
@@ -72,22 +74,37 @@ def _as_local(value: datetime) -> datetime:
     return value if value.tzinfo else value.replace(tzinfo=dt_util.get_default_time_zone())
 
 
+def _start_of(value: date) -> datetime:
+    """Return a date as local midnight, or a datetime as local time."""
+    if isinstance(value, datetime):
+        return _as_local(value)
+    return dt_util.start_of_local_day(value)
+
+
 @callback
 def async_setup_services(hass: HomeAssistant) -> None:
     """Register the integration services."""
 
     async def reupload(call: ServiceCall) -> ServiceResponse:
         entry = _entry(hass, call)
-        start: date = call.data[ATTR_START]
+        coordinator = entry.runtime_data
+        uploader = coordinator.uploader
         end: date = call.data.get(ATTR_END) or dt_util.now().date()
-        if end < start:
+        if call.data[ATTR_SINCE_FAILURE]:
+            if (first := await uploader.async_first_unsent()) is None:
+                return {"status_days": 0, "output_days": 0}
+            start = dt_util.as_local(dt_util.utc_from_timestamp(first))
+        elif ATTR_START in call.data:
+            start = _start_of(call.data[ATTR_START])
+        else:
+            raise ServiceValidationError(
+                translation_domain=DOMAIN, translation_key="start_required"
+            )
+        if end < start.date():
             raise ServiceValidationError(
                 translation_domain=DOMAIN, translation_key="end_before_start"
             )
-        coordinator = entry.runtime_data
-        result = await coordinator.uploader.async_reupload(
-            start, end, call.data[ATTR_METHOD]
-        )
+        result = await uploader.async_reupload(start, end, call.data[ATTR_METHOD])
         await coordinator.async_request_refresh()
         return result
 

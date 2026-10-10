@@ -572,27 +572,36 @@ class Uploader:
 
     # Services
 
-    async def async_reupload(self, start: date, end: date, method: str) -> dict[str, int]:
-        """Queue days for sending again."""
+    async def async_first_unsent(self) -> int | None:
+        """Return the oldest sample not confirmed by PVOutput (waiting, rejected or expired)."""
+        return await self._run(self.store.first_unsent)
+
+    async def async_reupload(
+        self, start: datetime, end: date, method: str
+    ) -> dict[str, int]:
+        """Queue history from ``start`` to the end of day ``end`` for sending again."""
         async with self.lock:
+            now = time.time()
             today = dt_util.now().date()
             end = min(end, today)
-            window_day = _local(self.window_start(time.time())).date()
+            window = self.window_start(now)
+            window_day = _local(window).date()
+            start_ts = int(start.timestamp())
+            start_day = dt_util.as_local(start).date()
             status_days = 0
             output_days: set[str] = set()
 
             if method in (REUPLOAD_AUTO, REUPLOAD_STATUSES):
-                first = max(start, window_day)
-                if first <= end:
-                    lo, _ = self._day_bounds(first)
-                    _, hi = self._day_bounds(end)
+                lo = max(start_ts, self._day_bounds(window_day)[0])
+                _, hi = self._day_bounds(end)
+                if lo < hi:
                     await self._run(self.store.mark_range, lo, hi, PENDING)
-                    status_days = (end - first).days + 1
+                    status_days = (end - max(start_day, window_day)).days + 1
             if method in (REUPLOAD_AUTO, REUPLOAD_OUTPUTS):
                 last = end if method == REUPLOAD_OUTPUTS else min(
                     end, window_day - timedelta(days=1)
                 )
-                day = start
+                day = start_day
                 while day <= last:
                     output_days.add(day.strftime("%Y%m%d"))
                     day += timedelta(days=1)

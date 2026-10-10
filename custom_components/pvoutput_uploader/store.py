@@ -143,6 +143,11 @@ class SampleStore:
         )
         return rows[0][0] if rows else None
 
+    def first_unsent(self) -> int | None:
+        """Return the oldest timestamp not confirmed sent (pending, failed or expired)."""
+        rows = self._execute("SELECT MIN(ts) FROM samples WHERE uploaded != ?", (DONE,))
+        return rows[0][0] if rows else None
+
     def pending_ts(self, min_ts: int, max_ts: int, limit: int) -> list[int]:
         """Return pending timestamps in [min_ts, max_ts], oldest first."""
         rows = self._execute(

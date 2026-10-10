@@ -10,6 +10,7 @@ import pytest
 
 from homeassistant.config_entries import ConfigEntryState
 from homeassistant.core import HomeAssistant
+from homeassistant.data_entry_flow import FlowResultType
 from homeassistant.exceptions import ServiceValidationError
 from homeassistant.util import dt as dt_util
 from pytest_homeassistant_custom_component.common import MockConfigEntry
@@ -136,6 +137,27 @@ async def test_actions(recorder_mock, hass: HomeAssistant, entry: MockConfigEntr
     )
     assert result == {"from_states": 0, "from_statistics": 0}
 
+    # Nothing unsent yet.
+    result = await hass.services.async_call(
+        DOMAIN, "reupload", {"since_failure": True}, blocking=True, return_response=True
+    )
+    assert result == {"status_days": 0, "output_days": 0}
+
+    # A date and time works as start too.
+    result = await hass.services.async_call(
+        DOMAIN,
+        "reupload",
+        {"start": f"{(today - timedelta(days=1)).isoformat()} 12:00:00"},
+        blocking=True,
+        return_response=True,
+    )
+    assert result == {"status_days": 2, "output_days": 0}
+
+    with pytest.raises(ServiceValidationError):
+        await hass.services.async_call(
+            DOMAIN, "reupload", {}, blocking=True, return_response=True
+        )
+
     with pytest.raises(ServiceValidationError):
         await hass.services.async_call(
             DOMAIN,
@@ -153,5 +175,58 @@ async def test_actions(recorder_mock, hass: HomeAssistant, entry: MockConfigEntr
             blocking=True,
             return_response=True,
         )
+
+    assert await hass.config_entries.async_unload(entry.entry_id)
+
+
+async def test_history_from_the_menu(
+    recorder_mock, hass: HomeAssistant, entry: MockConfigEntry
+) -> None:
+    with patch(GET_SYSTEM, AsyncMock(return_value=SystemInfo("My System", 5, False))):
+        await _setup(hass, entry)
+    today = dt_util.now().date()
+
+    result = await hass.config_entries.options.async_init(entry.entry_id)
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"], {"next_step_id": "reupload"}
+    )
+    assert result["step_id"] == "reupload"
+    placeholders = result["description_placeholders"]
+    assert placeholders["status_days"] == "14"
+    assert placeholders["first_unsent"].startswith("none")
+
+    async def submit(data: dict) -> dict:
+        return await hass.config_entries.options.async_configure(
+            result["flow_id"], {"method": "auto", "end": today.isoformat()} | data
+        )
+
+    # Nothing recorded yet, so nothing unsent.
+    result = await submit({"from": "since_failure"})
+    assert result["errors"] == {"base": "nothing_unsent"}
+    result = await submit({"from": "from_time"})
+    assert result["errors"] == {"start": "start_required"}
+    result = await submit(
+        {"from": "from_time", "start": f"{today.isoformat()} 00:00:00",
+         "end": (today - timedelta(days=1)).isoformat()}
+    )
+    assert result["errors"] == {"base": "end_before_start"}
+    result = await submit(
+        {"from": "from_time", "start": f"{(today - timedelta(days=2)).isoformat()} 06:00:00"}
+    )
+    assert result["type"] is FlowResultType.ABORT
+    assert result["reason"] == "reupload_queued"
+    assert result["description_placeholders"] == {"status_days": "3", "output_days": "0"}
+
+    result = await hass.config_entries.options.async_init(entry.entry_id)
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"], {"next_step_id": "import_history"}
+    )
+    start = (dt_util.now() - timedelta(hours=3)).strftime("%Y-%m-%d %H:%M:%S")
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"], {"start": start, "overwrite": False, "upload": False}
+    )
+    assert result["type"] is FlowResultType.ABORT
+    assert result["reason"] == "import_done"
+    assert result["description_placeholders"] == {"from_states": "0", "from_statistics": "0"}
 
     assert await hass.config_entries.async_unload(entry.entry_id)

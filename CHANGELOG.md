@@ -2,7 +2,10 @@
 
 ## 0.0.1b2
 
-- Options menu: separate **Add sensor field** and **Add constant field**; editing a field shows only the inputs of its kind.
+- Configure menu reworked: **Add field** asks first whether the value comes from a sensor or is a fixed value; editing a field shows only the inputs of its kind; every action saves when submitted (no separate save step); explanations on every screen.
+- **Reupload history** and **Import history from Home Assistant** are in the Configure menu, besides the actions.
+- Reupload starts **since the first unsent status** (waiting, rejected or too old) or **from a date and time**, like IoTaWatt's reload; the action takes `since_failure` or a date or datetime `start`.
+- Integration icon (shown by Home Assistant 2026.3+), entity and action icons.
 - Tests for the builder, store, API client, uploader, flows, setup and actions; releases now wait for them, hassfest and the HACS checks.
 
 ## 0.0.1b1

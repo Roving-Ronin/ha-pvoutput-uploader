@@ -138,12 +138,24 @@ async def _configure(hass: HomeAssistant, result: FlowResult, data: dict[str, An
     return await hass.config_entries.options.async_configure(result["flow_id"], data)
 
 
-async def test_add_sensor_field(recorder_mock, hass: HomeAssistant, sensors) -> None:
+async def _add(hass: HomeAssistant, entry: MockConfigEntry, kind: str) -> FlowResult:
+    """Open the menu, choose Add field and the kind of source."""
+    result = await _choose(hass, await _menu(hass, entry), "add_field")
+    assert result["type"] is FlowResultType.MENU
+    assert result["menu_options"] == ["add_sensor", "add_constant"]
+    return await _choose(hass, result, kind)
+
+
+async def test_menu(recorder_mock, hass: HomeAssistant) -> None:
     entry = options_entry(hass)
     result = await _menu(hass, entry)
-    assert result["menu_options"] == ["add_sensor", "add_constant", "settings", "save"]
+    assert result["menu_options"] == ["add_field", "reupload", "import_history", "settings"]
+    assert "No fields yet" in result["description_placeholders"]["fields"]
 
-    result = await _choose(hass, result, "add_sensor")
+
+async def test_add_sensor_field(recorder_mock, hass: HomeAssistant, sensors) -> None:
+    entry = options_entry(hass)
+    result = await _add(hass, entry, "add_sensor")
     assert result["type"] is FlowResultType.FORM
     assert select_options(result, "field") == ["v1", "v2", "v3", "v4", "v5", "v6"]  # no donor fields
 
@@ -151,40 +163,39 @@ async def test_add_sensor_field(recorder_mock, hass: HomeAssistant, sensors) -> 
     assert result["step_id"] == "sensor_details"
     assert result["description_placeholders"]["entity"] == "sensor.outside"
     result = await _configure(hass, result, {"name": "Outside", "active": True, "aggregate": "average"})
-    assert result["type"] is FlowResultType.MENU
-    assert "edit_field" in result["menu_options"]
-    assert "Outside" in result["description_placeholders"]["fields"]
-
-    # The used field is no longer offered.
-    result = await _choose(hass, result, "add_sensor")
-    assert "v5" not in select_options(result, "field")
-    result = await _configure(hass, result, {"entity_id": "sensor.power", "field": "v2"})
-    result = await _configure(hass, result, {"name": "Power", "active": False, "aggregate": "last"})
-    result = await _choose(hass, result, "save")
+    # Saved at once.
     assert result["type"] is FlowResultType.CREATE_ENTRY
     assert entry.options[CONF_FIELDS] == [
         {
             "field": "v5", "entity_id": "sensor.outside", "constant": None,
             "name": "Outside", "active": True, "aggregate": "average",
         },
-        {
-            "field": "v2", "entity_id": "sensor.power", "constant": None,
-            "name": "Power", "active": False, "aggregate": "last",
-        },
     ]
+
+    # The menu now lists it, and the used field is no longer offered.
+    result = await _menu(hass, entry)
+    assert result["menu_options"] == [
+        "add_field", "edit_field", "remove_field", "reupload", "import_history", "settings"
+    ]
+    assert "Outside" in result["description_placeholders"]["fields"]
+    result = await _add(hass, entry, "add_sensor")
+    assert "v5" not in select_options(result, "field")
+    result = await _configure(hass, result, {"entity_id": "sensor.power", "field": "v2"})
+    result = await _configure(hass, result, {"name": "Power", "active": False, "aggregate": "last"})
+    assert [m["field"] for m in entry.options[CONF_FIELDS]] == ["v5", "v2"]
+    assert entry.options[CONF_FIELDS][1]["active"] is False
 
 
 async def test_add_constant_field(recorder_mock, hass: HomeAssistant) -> None:
     entry = options_entry(hass, donor=True)
-    result = await _choose(hass, await _menu(hass, entry), "add_constant")
+    result = await _add(hass, entry, "add_constant")
     offered = select_options(result, "field")
     assert "v12" in offered
     assert "b3" in offered
 
     # The name defaults to PVOutput's name for the field.
     result = await _configure(hass, result, {"field": "b3", "constant": 5544, "active": True})
-    assert result["type"] is FlowResultType.MENU
-    result = await _choose(hass, result, "save")
+    assert result["type"] is FlowResultType.CREATE_ENTRY
     assert entry.options[CONF_FIELDS] == [
         {
             "field": "b3", "entity_id": None, "constant": 5544,
@@ -195,7 +206,7 @@ async def test_add_constant_field(recorder_mock, hass: HomeAssistant) -> None:
 
 async def test_unit_checks(recorder_mock, hass: HomeAssistant, sensors) -> None:
     entry = options_entry(hass)
-    result = await _choose(hass, await _menu(hass, entry), "add_sensor")
+    result = await _add(hass, entry, "add_sensor")
     result = await _configure(hass, result, {"entity_id": "sensor.power", "field": "v5"})
     assert result["errors"] == {"base": "unit_mismatch"}
     result = await _configure(hass, result, {"entity_id": "sensor.energy", "field": "v1"})
@@ -206,12 +217,12 @@ async def test_extended_energy_needs_energy_unit(
     recorder_mock, hass: HomeAssistant, sensors
 ) -> None:
     entry = options_entry(hass, donor=True)
-    result = await _choose(hass, await _menu(hass, entry), "add_sensor")
+    result = await _add(hass, entry, "add_sensor")
     result = await _configure(hass, result, {"entity_id": "sensor.power", "field": "v10"})
     result = await _configure(hass, result, {"name": "V2L", "active": True, "aggregate": "energy_today"})
     assert result["errors"] == {"base": "unit_mismatch"}
     result = await _configure(hass, result, {"name": "V2L", "active": True, "aggregate": "average"})
-    assert result["type"] is FlowResultType.MENU
+    assert result["type"] is FlowResultType.CREATE_ENTRY
 
 
 def _schema_keys(result: FlowResult) -> list[str]:
@@ -229,7 +240,7 @@ async def test_edit_and_remove(recorder_mock, hass: HomeAssistant, sensors) -> N
     }
     entry = options_entry(hass, donor=True, fields=[sensor, constant])
 
-    # A sensor field shows the sensor, never a constant.
+    # A sensor field shows the sensor, never a value.
     result = await _choose(hass, await _menu(hass, entry), "edit_field")
     result = await _configure(hass, result, {"field": "v5"})
     assert result["step_id"] == "edit_details"
@@ -238,14 +249,13 @@ async def test_edit_and_remove(recorder_mock, hass: HomeAssistant, sensors) -> N
         hass, result,
         {"entity_id": "sensor.outside", "name": "Ambient", "active": False, "aggregate": "last"},
     )
-    assert result["type"] is FlowResultType.MENU
+    assert result["type"] is FlowResultType.CREATE_ENTRY
 
-    # A constant field shows the value only.
-    result = await _choose(hass, result, "edit_field")
+    # A fixed value shows the value only.
+    result = await _choose(hass, await _menu(hass, entry), "edit_field")
     result = await _configure(hass, result, {"field": "b3"})
     assert _schema_keys(result) == ["constant", "name", "active"]
     result = await _configure(hass, result, {"constant": 10000, "name": "Battery", "active": True})
-    result = await _choose(hass, result, "save")
     assert entry.options[CONF_FIELDS] == [
         sensor | {"name": "Ambient", "active": False, "aggregate": "last"},
         constant | {"constant": 10000, "name": "Battery"},
@@ -253,14 +263,14 @@ async def test_edit_and_remove(recorder_mock, hass: HomeAssistant, sensors) -> N
 
     result = await _choose(hass, await _menu(hass, entry), "remove_field")
     result = await _configure(hass, result, {"fields": ["v5", "b3"]})
-    assert result["menu_options"] == ["add_sensor", "add_constant", "settings", "save"]
-    result = await _choose(hass, result, "save")
+    assert result["type"] is FlowResultType.CREATE_ENTRY
     assert entry.options[CONF_FIELDS] == []
 
 
 async def test_settings_switch_to_donor(recorder_mock, hass: HomeAssistant) -> None:
     entry = options_entry(hass)
     result = await _choose(hass, await _menu(hass, entry), "settings")
+    assert result["description_placeholders"]["detected_account"] == "standard"
     result = await _configure(
         hass, result,
         {
@@ -270,14 +280,20 @@ async def test_settings_switch_to_donor(recorder_mock, hass: HomeAssistant) -> N
             "output_fallback": True,
         },
     )
-    assert result["type"] is FlowResultType.MENU
-    assert result["description_placeholders"]["account"] == "donor"
-    result = await _choose(hass, result, "save")
+    assert result["type"] is FlowResultType.CREATE_ENTRY
     assert entry.options["donor_mode"] == "donor"
     assert entry.options["upload_interval"] == "10"
     assert entry.options["retention_days"] == 200
     assert entry.options["output_fallback"] is True
 
     # Donor fields are now offered.
-    result = await _choose(hass, await _menu(hass, entry), "add_sensor")
+    result = await _add(hass, entry, "add_sensor")
     assert "v7" in select_options(result, "field")
+
+
+async def test_history_needs_running_integration(recorder_mock, hass: HomeAssistant) -> None:
+    entry = options_entry(hass)
+    for step in ("reupload", "import_history"):
+        result = await _choose(hass, await _menu(hass, entry), step)
+        assert result["type"] is FlowResultType.ABORT
+        assert result["reason"] == "not_loaded"
