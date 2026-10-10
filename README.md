@@ -6,7 +6,7 @@ Send any Home Assistant sensor to [PVOutput](https://pvoutput.org) **without eve
 a gap**.
 
 The integration keeps its **own history log**: every 5 minutes it stores the values of
-every configured sensor, and it keeps them for **400 days** (configurable), however short
+every configured sensor, and it keeps them for **91 days** (configurable), however short
 Home Assistant's recorder history is. Whatever stops the uploads (PVOutput down, the
 internet out, the hourly limit, uploading switched off), the data waits in the log and is
 sent as soon as PVOutput accepts it, **without you doing anything**. Like the PVOutput
@@ -16,7 +16,7 @@ service of the IoTaWatt firmware, any period in the log can also be sent again.
 
 | | What it holds | How long | Used for |
 |---|---|---|---|
-| **History log** (`pvoutput_uploader_<system id>.db` in the configuration folder) | 5 minute values of every configured sensor, active and passive, temperatures included | **400 days** by default (*Settings → Keep history for*) | Everything that is sent and reuploaded |
+| **History log** (`pvoutput_uploader_<system id>.db` in the configuration folder) | 5 minute values of every configured sensor, active and passive, temperatures included | **91 days** by default (*Settings → Keep history for*): the 90 days donors can send statuses for, plus today | Everything that is sent and reuploaded |
 | Home Assistant **recorder** states | Every state change of the sensors | `purge_keep_days` of the recorder (10 days by default) | Feeding the log every minute, and catching up after the integration was not running |
 | Home Assistant **long term statistics** | Hourly mean/min/max, or energy change, of sensors that have a `state_class` | Forever | Only **Import history**, for periods the log never recorded |
 
@@ -151,7 +151,7 @@ is only stored, ready for a later reupload.
   configured sensors from the recorder and stores them in
   `pvoutput_uploader_<system id>.db` in the configuration folder (included in Home
   Assistant backups). The log is always 5 minute resolution, whatever the upload
-  interval, and is kept for 400 days by default.
+  interval, and is kept for 91 days by default.
 - **Uploads.** Statuses are built from the log at the upload interval (the system's
   status interval in PVOutput, or set by hand) and sent oldest first, up to 30 per
   request (100 for donors). Only statuses PVOutput confirms in its answer count as sent.
@@ -178,7 +178,7 @@ is only stored, ready for a later reupload.
 
 - **Account type**: detect from PVOutput, donor or standard.
 - **Upload interval**: from PVOutput, 5, 10 or 15 minutes.
-- **Keep history for**: days the log is kept (default 400).
+- **Keep history for**: days the log is kept (default 91: the 90 days donors can send statuses for, plus today).
 - **Daily output fallback**: when statuses become too old to send, send that day's
   totals as a daily output instead. Off by default, because it replaces the day's totals
   in PVOutput.

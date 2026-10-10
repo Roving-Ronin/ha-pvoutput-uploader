@@ -34,7 +34,7 @@ DONOR_NO: Final = "standard"
 INTERVAL_AUTO: Final = "auto"
 UPLOAD_INTERVALS: Final = (5, 10, 15)
 
-DEFAULT_RETENTION_DAYS: Final = 400
+DEFAULT_RETENTION_DAYS: Final = 91
 DEFAULT_INTERVAL_MINUTES: Final = 5
 
 # The history log always holds 5 minute rows, whatever the upload interval.

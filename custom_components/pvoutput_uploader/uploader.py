@@ -172,6 +172,8 @@ class Uploader:
         self.last_error: str | None = None
         self.summary: dict[str, Any] = {}
         self._batch_limit = self.batch_size
+        # When each slot was first not confirmed by PVOutput, for the retry window.
+        self._unconfirmed_since: dict[int, float] = {}
 
     # Settings
 
@@ -313,21 +315,23 @@ class Uploader:
         measured = False
         for m in self.active_mappings:
             value: float | None
+            current = [r.values[m.field] for r in in_slot]
+            valid = [v for v in current if v is not None]
             if m.entity_id is None:
                 value = m.constant
             elif m.aggregate == AGG_ENERGY_TODAY:
-                found = [r.values[m.field] for r in day_rows if r.ts <= slot]
-                found = [v for v in found if v is not None]
-                value = sum(found) if found else None
-            else:
-                found = [r.values[m.field] for r in in_slot]
-                found = [v for v in found if v is not None]
-                if not found:
-                    value = None
-                elif m.aggregate == AGG_LAST:
-                    value = found[-1]
+                # Only with a counter reading in this interval; otherwise the
+                # status would repeat an old total as if it were current.
+                if valid:
+                    found = [r.values[m.field] for r in day_rows if r.ts <= slot]
+                    value = sum(v for v in found if v is not None)
                 else:
-                    value = sum(found) / len(found)
+                    value = None
+            elif m.aggregate == AGG_LAST:
+                # The reading at the end of the interval; none if unavailable then.
+                value = current[-1] if current else None
+            else:
+                value = sum(valid) / len(valid) if valid else None
             if value is not None:
                 values[m.field] = _fmt(value, m.decimals)
                 measured = measured or m.entity_id is not None
@@ -422,6 +426,7 @@ class Uploader:
 
             for slot, _ in entries:
                 if slot in confirmed:
+                    self._unconfirmed_since.pop(slot, None)
                     await self._mark_slot(slot, DONE)
                 else:
                     await self._unconfirmed(slot, "PVOutput did not add the status", deferred)
@@ -456,12 +461,19 @@ class Uploader:
         return ",".join([local.strftime("%Y%m%d"), local.strftime("%H:%M"), *cols])
 
     async def _unconfirmed(self, slot: int, message: str, deferred: set[int]) -> None:
-        """Retry a status in later cycles, giving up after a while."""
-        if time.time() - slot < UNCONFIRMED_RETRY_SECONDS:
+        """Retry a status in later cycles, giving up after a while.
+
+        The window starts at the first attempt PVOutput did not confirm, so old
+        statuses (backlog, reupload, import) get the same retries as new ones.
+        """
+        now = time.time()
+        first = self._unconfirmed_since.setdefault(slot, now)
+        if now - first < UNCONFIRMED_RETRY_SECONDS:
             deferred.add(slot)
             self.last_error = f"{_local(slot).isoformat()}: {message}, will retry"
             return
         await self._mark_slot(slot, FAILED)
+        self._unconfirmed_since.pop(slot, None)
         self.last_error = f"{_local(slot).isoformat()}: {message}"
         _LOGGER.warning("PVOutput did not take the status for %s: %s", _local(slot), message)
 

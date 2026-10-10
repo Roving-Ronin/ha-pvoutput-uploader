@@ -212,7 +212,8 @@ async def test_fifteen_minute_interval(
         last_built=local_ts(10, 10, 10, 20),
     )
     await up._async_upload_statuses()
-    assert up.client.batches == [["20261010,10:15,6,200,,2"]]
+    # v4 is unavailable at the end of the slot: no last value is sent.
+    assert up.client.batches == [["20261010,10:15,6,200"]]
     st = await states(up, 0, 2**40)
     assert st[local_ts(10, 10, 10, 15)] == DONE
     assert st[local_ts(10, 10, 10, 20)] == PENDING
@@ -539,3 +540,55 @@ async def test_only_confirmed_statuses_count_as_sent(
     now.move_to(local_dt(10, 10, 12, 30))
     await up._async_upload_statuses()
     assert (await states(up, 0, 2**40))[times[1]] == FAILED
+
+
+async def test_unavailable_values_are_not_sent_as_current(
+    hass: HomeAssistant, tmp_path: Path, now: FrozenDateTimeFactory
+) -> None:
+    up = await make(
+        hass,
+        tmp_path,
+        [field("v1", aggregate=AGG_ENERGY_TODAY), field("v2"), field("v4", aggregate=AGG_LAST)],
+        **{CONF_UPLOAD_INTERVAL: "15"},
+    )
+    gap: dict[str, float | None] = {"v1": None, "v2": None, "v4": None}
+    await add(
+        up,
+        Sample(local_ts(10, 10, 10, 5), {"v1": 1.0, "v2": 100.0, "v4": 100.0}),
+        Sample(local_ts(10, 10, 10, 10), gap),
+        Sample(local_ts(10, 10, 10, 15), gap),
+        # Only power reports in the next slot; the energy counter is unavailable.
+        Sample(local_ts(10, 10, 10, 20), {"v1": None, "v2": 200.0, "v4": None}),
+        Sample(local_ts(10, 10, 10, 25), gap),
+        Sample(local_ts(10, 10, 10, 30), gap),
+        last_built=local_ts(10, 10, 10, 30),
+    )
+    await up._async_upload_statuses()
+    assert up.client.batches == [
+        [
+            # v4 read 100 but was unavailable at 10:15: not sent as current.
+            "20261010,10:15,1,100",
+            # No counter reading in this slot: today's total is not repeated.
+            "20261010,10:30,,200",
+        ]
+    ]
+
+
+async def test_old_statuses_get_the_full_retry_window(
+    hass: HomeAssistant, tmp_path: Path, now: FrozenDateTimeFactory
+) -> None:
+    up = await make(hass, tmp_path, [field("v2")])
+    old = local_ts(10, 9, 10, 5)  # yesterday, e.g. imported or reuploaded
+    await add(up, Sample(old, {"v2": 100.0}), last_built=local_ts(10, 10, 10, 15))
+    up.client.not_added = {"10:05"}
+
+    await up._async_upload_statuses()
+    assert (await states(up, 0, 2**40))[old] == PENDING
+
+    now.move_to(local_dt(10, 10, 11, 20))
+    await up._async_upload_statuses()
+    assert (await states(up, 0, 2**40))[old] == PENDING
+
+    now.move_to(local_dt(10, 10, 12, 30))
+    await up._async_upload_statuses()
+    assert (await states(up, 0, 2**40))[old] == FAILED
