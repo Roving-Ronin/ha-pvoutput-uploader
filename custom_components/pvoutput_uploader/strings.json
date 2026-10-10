@@ -24,29 +24,39 @@
         "title": "PVOutput fields",
         "description": "Account: **{account}**. PVOutput status interval: {detected_interval} min.\n\n{fields}\n\nChanges are kept only after **Save and close**.",
         "menu_options": {
-          "add_field": "Add field",
+          "add_sensor": "Add sensor field",
+          "add_constant": "Add constant field",
           "edit_field": "Edit field",
           "remove_field": "Remove fields",
           "settings": "Settings",
           "save": "Save and close"
         }
       },
-      "add_field": {
-        "title": "Add field",
-        "description": "Pick a sensor, or enter a constant value instead (for example battery size), and the PVOutput field it feeds. Only fields not yet used and available to your account type are listed.",
+      "add_sensor": {
+        "title": "Add sensor field",
+        "description": "Pick a sensor and the PVOutput field it feeds. Only fields not yet used and available to your account type are listed.",
         "data": {
           "entity_id": "Sensor",
-          "constant": "Constant value",
           "field": "PVOutput field"
         }
       },
-      "field_details": {
+      "sensor_details": {
         "title": "{field}",
-        "description": "Name the field as it is labelled in PVOutput. Passive fields are recorded in the history log but not sent; switch them to active later and use the reupload action to send their history.",
+        "description": "From `{entity}`. Name the field as it is labelled in PVOutput. Passive fields are recorded in the history log but not sent; make them active later and use the reupload action to send their history.",
         "data": {
           "name": "Name in PVOutput",
           "active": "Active (send to PVOutput)",
           "aggregate": "Value per interval"
+        }
+      },
+      "add_constant": {
+        "title": "Add constant field",
+        "description": "A fixed value sent with every status, for example the battery size (b3). It is not recorded in the history log and never makes a status on its own.",
+        "data": {
+          "field": "PVOutput field",
+          "constant": "Value",
+          "name": "Name in PVOutput",
+          "active": "Active (send to PVOutput)"
         }
       },
       "edit_field": {
@@ -57,10 +67,9 @@
       },
       "edit_details": {
         "title": "{field}",
-        "description": "Use either a sensor or a constant value.",
         "data": {
           "entity_id": "Sensor",
-          "constant": "Constant value",
+          "constant": "Value",
           "name": "Name in PVOutput",
           "active": "Active (send to PVOutput)",
           "aggregate": "Value per interval"
@@ -89,11 +98,7 @@
       }
     },
     "error": {
-      "entity_or_constant": "Choose a sensor or enter a constant value, not both.",
       "unit_mismatch": "The sensor's unit does not fit this field."
-    },
-    "abort": {
-      "no_free_fields": "All fields available to your account are already used."
     }
   },
   "selector": {

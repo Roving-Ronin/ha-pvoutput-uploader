@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.0.1b2
+
+- Options menu: separate **Add sensor field** and **Add constant field**; editing a field shows only the inputs of its kind.
+- Tests for the builder, store, API client, uploader, flows, setup and actions; releases now wait for them, hassfest and the HACS checks.
+
 ## 0.0.1b1
 
 First beta.

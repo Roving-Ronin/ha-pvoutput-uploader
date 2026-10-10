@@ -173,22 +173,41 @@ class PVOutputUploaderOptionsFlow(OptionsFlow):
             )
         return "\n".join(lines) or "No fields yet."
 
-    def _check_source(
-        self, field: str, entity_id: str | None, constant: Any, aggregate: str | None
-    ) -> str | None:
-        """Return an error key if the source does not fit the field."""
-        if bool(entity_id) == (constant is not None):
-            return "entity_or_constant"
-        if not entity_id:
-            return None
-        kind = FIELDS_BY_KEY[field].kind
-        if aggregate == AGG_ENERGY_TODAY:
-            kind = KIND_ENERGY
+    def _unit_error(self, field: str, entity_id: str, aggregate: str) -> str | None:
+        """Return an error key if the sensor's unit does not fit the field."""
+        kind = KIND_ENERGY if aggregate == AGG_ENERGY_TODAY else FIELDS_BY_KEY[field].kind
         state = self.hass.states.get(entity_id)
         unit = state.attributes.get(ATTR_UNIT_OF_MEASUREMENT) if state else None
-        if not unit_supported(kind, unit):
-            return "unit_mismatch"
-        return None
+        return None if unit_supported(kind, unit) else "unit_mismatch"
+
+    def _free_fields(self) -> list[str]:
+        """Return the fields not used yet that the account may send."""
+        used = {m[MAP_FIELD] for m in self._fields}
+        donor = self._donor()
+        return [f.key for f in FIELD_CATALOG if f.key not in used and (donor or not f.donor)]
+
+    def _field_selector(self, keys: list[str]) -> SelectSelector:
+        return SelectSelector(
+            SelectSelectorConfig(
+                options=self._field_options(keys), mode=SelectSelectorMode.DROPDOWN
+            )
+        )
+
+    def _details_schema(self, field: str, has_entity: bool) -> dict[Any, Any]:
+        """Name, active flag and, for sensors, how values are combined."""
+        fdef = FIELDS_BY_KEY[field]
+        schema: dict[Any, Any] = {
+            vol.Required(MAP_NAME): TextSelector(),
+            vol.Required(MAP_ACTIVE): BooleanSelector(),
+        }
+        if has_entity and len(fdef.aggregates) > 1:
+            schema[vol.Required(MAP_AGGREGATE)] = SelectSelector(
+                SelectSelectorConfig(
+                    options=list(fdef.aggregates),
+                    translation_key="aggregate",
+                )
+            )
+        return schema
 
     async def async_step_init(
         self, user_input: dict[str, Any] | None = None
@@ -196,7 +215,9 @@ class PVOutputUploaderOptionsFlow(OptionsFlow):
         """Show the main menu."""
         if not self._options:
             self._options = deepcopy(DEFAULT_OPTIONS) | deepcopy(dict(self.config_entry.options))
-        menu = ["add_field"]
+        menu = []
+        if self._free_fields():
+            menu += ["add_sensor", "add_constant"]
         if self._fields:
             menu += ["edit_field", "remove_field"]
         menu += ["settings", "save"]
@@ -213,63 +234,33 @@ class PVOutputUploaderOptionsFlow(OptionsFlow):
 
     # Add
 
-    async def async_step_add_field(
+    async def async_step_add_sensor(
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
-        """Pick a sensor (or constant) and the PVOutput field it feeds."""
-        used = {m[MAP_FIELD] for m in self._fields}
-        donor = self._donor()
-        free = [f.key for f in FIELD_CATALOG if f.key not in used and (donor or not f.donor)]
-        if not free:
-            return self.async_abort(reason="no_free_fields")
+        """Pick a sensor and the PVOutput field it feeds."""
         errors: dict[str, str] = {}
         if user_input is not None:
             field = user_input[MAP_FIELD]
-            entity_id = user_input.get(MAP_ENTITY)
-            constant = user_input.get(MAP_CONSTANT)
-            # Extended fields default to "average"; energy_today is checked later.
-            error = self._check_source(
-                field, entity_id, constant, FIELDS_BY_KEY[field].default_aggregate
-            )
-            if error:
+            entity_id = user_input[MAP_ENTITY]
+            # Extended fields start as "average"; energy since midnight is checked later.
+            if error := self._unit_error(field, entity_id, FIELDS_BY_KEY[field].default_aggregate):
                 errors["base"] = error
             else:
-                self._new = {MAP_FIELD: field, MAP_ENTITY: entity_id, MAP_CONSTANT: constant}
-                return await self.async_step_field_details()
+                self._new = {MAP_FIELD: field, MAP_ENTITY: entity_id, MAP_CONSTANT: None}
+                return await self.async_step_sensor_details()
         schema = vol.Schema(
             {
-                vol.Optional(MAP_ENTITY): ENTITY_SELECTOR,
-                vol.Optional(MAP_CONSTANT): CONSTANT_SELECTOR,
-                vol.Required(MAP_FIELD): SelectSelector(
-                    SelectSelectorConfig(
-                        options=self._field_options(free),
-                        mode=SelectSelectorMode.DROPDOWN,
-                    )
-                ),
+                vol.Required(MAP_ENTITY): ENTITY_SELECTOR,
+                vol.Required(MAP_FIELD): self._field_selector(self._free_fields()),
             }
         )
         return self.async_show_form(
-            step_id="add_field",
+            step_id="add_sensor",
             data_schema=self.add_suggested_values_to_schema(schema, user_input or {}),
             errors=errors,
         )
 
-    def _details_schema(self, field: str, has_entity: bool) -> vol.Schema:
-        fdef = FIELDS_BY_KEY[field]
-        schema: dict[Any, Any] = {
-            vol.Required(MAP_NAME): TextSelector(),
-            vol.Required(MAP_ACTIVE): BooleanSelector(),
-        }
-        if has_entity and len(fdef.aggregates) > 1:
-            schema[vol.Required(MAP_AGGREGATE)] = SelectSelector(
-                SelectSelectorConfig(
-                    options=list(fdef.aggregates),
-                    translation_key="aggregate",
-                )
-            )
-        return vol.Schema(schema)
-
-    async def async_step_field_details(
+    async def async_step_sensor_details(
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
         """Name the field and choose whether it is sent."""
@@ -278,10 +269,7 @@ class PVOutputUploaderOptionsFlow(OptionsFlow):
         errors: dict[str, str] = {}
         if user_input is not None:
             aggregate = user_input.get(MAP_AGGREGATE, fdef.default_aggregate)
-            error = self._check_source(
-                field, self._new[MAP_ENTITY], self._new[MAP_CONSTANT], aggregate
-            )
-            if error:
+            if error := self._unit_error(field, self._new[MAP_ENTITY], aggregate):
                 errors["base"] = error
             else:
                 self._fields.append(
@@ -300,13 +288,43 @@ class PVOutputUploaderOptionsFlow(OptionsFlow):
             MAP_AGGREGATE: fdef.default_aggregate,
         }
         return self.async_show_form(
-            step_id="field_details",
+            step_id="sensor_details",
             data_schema=self.add_suggested_values_to_schema(
-                self._details_schema(field, bool(self._new[MAP_ENTITY])), defaults
+                vol.Schema(self._details_schema(field, True)), defaults
             ),
-            description_placeholders={"field": f"{field} · {fdef.name}"},
+            description_placeholders={
+                "field": f"{field} · {fdef.name}",
+                "entity": self._new[MAP_ENTITY],
+            },
             errors=errors,
         )
+
+    async def async_step_add_constant(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """A fixed value sent with every status, such as the battery size."""
+        if user_input is not None:
+            field = user_input[MAP_FIELD]
+            self._fields.append(
+                {
+                    MAP_FIELD: field,
+                    MAP_ENTITY: None,
+                    MAP_CONSTANT: user_input[MAP_CONSTANT],
+                    MAP_NAME: user_input.get(MAP_NAME) or FIELDS_BY_KEY[field].name,
+                    MAP_ACTIVE: user_input[MAP_ACTIVE],
+                    MAP_AGGREGATE: FIELDS_BY_KEY[field].default_aggregate,
+                }
+            )
+            return await self.async_step_init()
+        schema = vol.Schema(
+            {
+                vol.Required(MAP_FIELD): self._field_selector(self._free_fields()),
+                vol.Required(MAP_CONSTANT): CONSTANT_SELECTOR,
+                vol.Optional(MAP_NAME): TextSelector(),
+                vol.Required(MAP_ACTIVE, default=True): BooleanSelector(),
+            }
+        )
+        return self.async_show_form(step_id="add_constant", data_schema=schema)
 
     # Edit
 
@@ -336,38 +354,41 @@ class PVOutputUploaderOptionsFlow(OptionsFlow):
     async def async_step_edit_details(
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
-        """Change the source, name, mode or active flag of a field."""
+        """Change a field, showing the inputs of its kind: sensor or constant."""
         assert self._edit_field is not None
         field = self._edit_field
         fdef = FIELDS_BY_KEY[field]
         mapping = self._mapping(field)
+        is_sensor = bool(mapping.get(MAP_ENTITY))
         errors: dict[str, str] = {}
         if user_input is not None:
-            aggregate = user_input.get(MAP_AGGREGATE, fdef.default_aggregate)
-            entity_id = user_input.get(MAP_ENTITY)
-            constant = user_input.get(MAP_CONSTANT)
-            error = self._check_source(field, entity_id, constant, aggregate)
-            if error:
+            aggregate = user_input.get(
+                MAP_AGGREGATE, mapping.get(MAP_AGGREGATE) or fdef.default_aggregate
+            )
+            if is_sensor and (
+                error := self._unit_error(field, user_input[MAP_ENTITY], aggregate)
+            ):
                 errors["base"] = error
             else:
                 mapping.update(
                     {
-                        MAP_ENTITY: entity_id,
-                        MAP_CONSTANT: constant,
                         MAP_NAME: user_input[MAP_NAME],
                         MAP_ACTIVE: user_input[MAP_ACTIVE],
-                        MAP_AGGREGATE: aggregate if entity_id else fdef.default_aggregate,
+                        MAP_AGGREGATE: aggregate,
                     }
                 )
+                if is_sensor:
+                    mapping[MAP_ENTITY] = user_input[MAP_ENTITY]
+                else:
+                    mapping[MAP_CONSTANT] = user_input[MAP_CONSTANT]
                 self._edit_field = None
                 return await self.async_step_init()
-        schema = vol.Schema(
-            {
-                vol.Optional(MAP_ENTITY): ENTITY_SELECTOR,
-                vol.Optional(MAP_CONSTANT): CONSTANT_SELECTOR,
-                **self._details_schema(field, True).schema,
-            }
+        source: dict[Any, Any] = (
+            {vol.Required(MAP_ENTITY): ENTITY_SELECTOR}
+            if is_sensor
+            else {vol.Required(MAP_CONSTANT): CONSTANT_SELECTOR}
         )
+        schema = vol.Schema(source | self._details_schema(field, is_sensor))
         defaults = user_input or {
             k: v for k, v in mapping.items() if v is not None and k != MAP_FIELD
         }

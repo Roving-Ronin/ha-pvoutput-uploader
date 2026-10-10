@@ -134,36 +134,32 @@ async def _choose(hass: HomeAssistant, result: FlowResult, step: str) -> FlowRes
     )
 
 
-async def test_add_field(recorder_mock, hass: HomeAssistant, sensors) -> None:
+async def _configure(hass: HomeAssistant, result: FlowResult, data: dict[str, Any]) -> FlowResult:
+    return await hass.config_entries.options.async_configure(result["flow_id"], data)
+
+
+async def test_add_sensor_field(recorder_mock, hass: HomeAssistant, sensors) -> None:
     entry = options_entry(hass)
     result = await _menu(hass, entry)
-    assert result["menu_options"] == ["add_field", "settings", "save"]
+    assert result["menu_options"] == ["add_sensor", "add_constant", "settings", "save"]
 
-    result = await _choose(hass, result, "add_field")
+    result = await _choose(hass, result, "add_sensor")
     assert result["type"] is FlowResultType.FORM
-    offered = select_options(result, "field")
-    assert offered == ["v1", "v2", "v3", "v4", "v5", "v6"]  # no donor fields
+    assert select_options(result, "field") == ["v1", "v2", "v3", "v4", "v5", "v6"]  # no donor fields
 
-    result = await hass.config_entries.options.async_configure(
-        result["flow_id"], {"entity_id": "sensor.outside", "field": "v5"}
-    )
-    assert result["step_id"] == "field_details"
-    result = await hass.config_entries.options.async_configure(
-        result["flow_id"], {"name": "Outside", "active": True, "aggregate": "average"}
-    )
+    result = await _configure(hass, result, {"entity_id": "sensor.outside", "field": "v5"})
+    assert result["step_id"] == "sensor_details"
+    assert result["description_placeholders"]["entity"] == "sensor.outside"
+    result = await _configure(hass, result, {"name": "Outside", "active": True, "aggregate": "average"})
     assert result["type"] is FlowResultType.MENU
     assert "edit_field" in result["menu_options"]
     assert "Outside" in result["description_placeholders"]["fields"]
 
     # The used field is no longer offered.
-    result = await _choose(hass, result, "add_field")
+    result = await _choose(hass, result, "add_sensor")
     assert "v5" not in select_options(result, "field")
-    result = await hass.config_entries.options.async_configure(
-        result["flow_id"], {"entity_id": "sensor.power", "field": "v2"}
-    )
-    result = await hass.config_entries.options.async_configure(
-        result["flow_id"], {"name": "Power", "active": False, "aggregate": "last"}
-    )
+    result = await _configure(hass, result, {"entity_id": "sensor.power", "field": "v2"})
+    result = await _configure(hass, result, {"name": "Power", "active": False, "aggregate": "last"})
     result = await _choose(hass, result, "save")
     assert result["type"] is FlowResultType.CREATE_ENTRY
     assert entry.options[CONF_FIELDS] == [
@@ -178,22 +174,16 @@ async def test_add_field(recorder_mock, hass: HomeAssistant, sensors) -> None:
     ]
 
 
-async def test_donor_fields_and_constant(recorder_mock, hass: HomeAssistant, sensors) -> None:
+async def test_add_constant_field(recorder_mock, hass: HomeAssistant) -> None:
     entry = options_entry(hass, donor=True)
-    result = await _choose(hass, await _menu(hass, entry), "add_field")
+    result = await _choose(hass, await _menu(hass, entry), "add_constant")
     offered = select_options(result, "field")
     assert "v12" in offered
     assert "b3" in offered
 
-    result = await hass.config_entries.options.async_configure(
-        result["flow_id"], {"constant": 5544, "field": "b3"}
-    )
-    assert result["step_id"] == "field_details"
-    # A constant has no aggregation to choose.
-    assert "aggregate" not in [str(k) for k in result["data_schema"].schema]
-    result = await hass.config_entries.options.async_configure(
-        result["flow_id"], {"name": "Battery Size", "active": True}
-    )
+    # The name defaults to PVOutput's name for the field.
+    result = await _configure(hass, result, {"field": "b3", "constant": 5544, "active": True})
+    assert result["type"] is FlowResultType.MENU
     result = await _choose(hass, result, "save")
     assert entry.options[CONF_FIELDS] == [
         {
@@ -203,69 +193,67 @@ async def test_donor_fields_and_constant(recorder_mock, hass: HomeAssistant, sen
     ]
 
 
-async def test_add_field_errors(recorder_mock, hass: HomeAssistant, sensors) -> None:
+async def test_unit_checks(recorder_mock, hass: HomeAssistant, sensors) -> None:
     entry = options_entry(hass)
-    result = await _choose(hass, await _menu(hass, entry), "add_field")
-    result = await hass.config_entries.options.async_configure(
-        result["flow_id"], {"entity_id": "sensor.outside", "constant": 1, "field": "v5"}
-    )
-    assert result["errors"] == {"base": "entity_or_constant"}
-    result = await hass.config_entries.options.async_configure(
-        result["flow_id"], {"field": "v5"}
-    )
-    assert result["errors"] == {"base": "entity_or_constant"}
-    result = await hass.config_entries.options.async_configure(
-        result["flow_id"], {"entity_id": "sensor.power", "field": "v5"}
-    )
+    result = await _choose(hass, await _menu(hass, entry), "add_sensor")
+    result = await _configure(hass, result, {"entity_id": "sensor.power", "field": "v5"})
     assert result["errors"] == {"base": "unit_mismatch"}
-    result = await hass.config_entries.options.async_configure(
-        result["flow_id"], {"entity_id": "sensor.energy", "field": "v1"}
-    )
-    assert result["step_id"] == "field_details"
+    result = await _configure(hass, result, {"entity_id": "sensor.energy", "field": "v1"})
+    assert result["step_id"] == "sensor_details"
 
 
 async def test_extended_energy_needs_energy_unit(
     recorder_mock, hass: HomeAssistant, sensors
 ) -> None:
     entry = options_entry(hass, donor=True)
-    result = await _choose(hass, await _menu(hass, entry), "add_field")
-    result = await hass.config_entries.options.async_configure(
-        result["flow_id"], {"entity_id": "sensor.power", "field": "v10"}
-    )
-    result = await hass.config_entries.options.async_configure(
-        result["flow_id"], {"name": "V2L", "active": True, "aggregate": "energy_today"}
-    )
+    result = await _choose(hass, await _menu(hass, entry), "add_sensor")
+    result = await _configure(hass, result, {"entity_id": "sensor.power", "field": "v10"})
+    result = await _configure(hass, result, {"name": "V2L", "active": True, "aggregate": "energy_today"})
     assert result["errors"] == {"base": "unit_mismatch"}
-    result = await hass.config_entries.options.async_configure(
-        result["flow_id"], {"name": "V2L", "active": True, "aggregate": "average"}
-    )
+    result = await _configure(hass, result, {"name": "V2L", "active": True, "aggregate": "average"})
     assert result["type"] is FlowResultType.MENU
+
+
+def _schema_keys(result: FlowResult) -> list[str]:
+    return [str(k) for k in result["data_schema"].schema]
 
 
 async def test_edit_and_remove(recorder_mock, hass: HomeAssistant, sensors) -> None:
-    field = {
+    sensor = {
         "field": "v5", "entity_id": "sensor.outside", "constant": None,
         "name": "Outside", "active": True, "aggregate": "average",
     }
-    entry = options_entry(hass, fields=[field])
+    constant = {
+        "field": "b3", "entity_id": None, "constant": 5544,
+        "name": "Battery Size", "active": True, "aggregate": "last",
+    }
+    entry = options_entry(hass, donor=True, fields=[sensor, constant])
+
+    # A sensor field shows the sensor, never a constant.
     result = await _choose(hass, await _menu(hass, entry), "edit_field")
-    result = await hass.config_entries.options.async_configure(result["flow_id"], {"field": "v5"})
+    result = await _configure(hass, result, {"field": "v5"})
     assert result["step_id"] == "edit_details"
-    result = await hass.config_entries.options.async_configure(
-        result["flow_id"],
+    assert _schema_keys(result) == ["entity_id", "name", "active", "aggregate"]
+    result = await _configure(
+        hass, result,
         {"entity_id": "sensor.outside", "name": "Ambient", "active": False, "aggregate": "last"},
     )
     assert result["type"] is FlowResultType.MENU
+
+    # A constant field shows the value only.
+    result = await _choose(hass, result, "edit_field")
+    result = await _configure(hass, result, {"field": "b3"})
+    assert _schema_keys(result) == ["constant", "name", "active"]
+    result = await _configure(hass, result, {"constant": 10000, "name": "Battery", "active": True})
     result = await _choose(hass, result, "save")
     assert entry.options[CONF_FIELDS] == [
-        field | {"name": "Ambient", "active": False, "aggregate": "last"}
+        sensor | {"name": "Ambient", "active": False, "aggregate": "last"},
+        constant | {"constant": 10000, "name": "Battery"},
     ]
 
     result = await _choose(hass, await _menu(hass, entry), "remove_field")
-    result = await hass.config_entries.options.async_configure(
-        result["flow_id"], {"fields": ["v5"]}
-    )
-    assert result["menu_options"] == ["add_field", "settings", "save"]
+    result = await _configure(hass, result, {"fields": ["v5", "b3"]})
+    assert result["menu_options"] == ["add_sensor", "add_constant", "settings", "save"]
     result = await _choose(hass, result, "save")
     assert entry.options[CONF_FIELDS] == []
 
@@ -273,8 +261,8 @@ async def test_edit_and_remove(recorder_mock, hass: HomeAssistant, sensors) -> N
 async def test_settings_switch_to_donor(recorder_mock, hass: HomeAssistant) -> None:
     entry = options_entry(hass)
     result = await _choose(hass, await _menu(hass, entry), "settings")
-    result = await hass.config_entries.options.async_configure(
-        result["flow_id"],
+    result = await _configure(
+        hass, result,
         {
             "donor_mode": "donor",
             "upload_interval": "10",
@@ -291,5 +279,5 @@ async def test_settings_switch_to_donor(recorder_mock, hass: HomeAssistant) -> N
     assert entry.options["output_fallback"] is True
 
     # Donor fields are now offered.
-    result = await _choose(hass, await _menu(hass, entry), "add_field")
+    result = await _choose(hass, await _menu(hass, entry), "add_sensor")
     assert "v7" in select_options(result, "field")

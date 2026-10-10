@@ -26,13 +26,14 @@ handling, and reloading history from a chosen date.
 ## Fields
 
 Fields are added one at a time under **Settings → Devices & services → PVOutput
-Uploader → Configure → Add field**:
+Uploader → Configure**, then **Save and close**:
 
-1. Pick a sensor (or enter a constant, e.g. battery size for `b3`) and the PVOutput
-   field it feeds. Only unused fields that the account type allows are offered.
-2. Give it the name used in PVOutput, choose whether it is **active**, and for fields
-   that allow it, how the 5 minute values are combined: average, last value, or energy
-   since midnight.
+- **Add sensor field**: pick a sensor and the PVOutput field it feeds (only unused fields
+  that the account type allows are offered), then give it the name used in PVOutput,
+  choose whether it is **active**, and for fields that allow it, how the 5 minute values
+  are combined: average, last value, or energy since midnight.
+- **Add constant field**: a fixed value sent with every status, e.g. the battery size for
+  `b3`. Constants are not logged and never make a status on their own.
 
 **Passive** fields are recorded in the log but not sent. Make one active later and
 run `pvoutput_uploader.reupload` to send its history.
