@@ -2,7 +2,7 @@
   "config": {
     "step": {
       "user": {
-        "title": "PVOutput system",
+        "title": "Add PV Site",
         "description": "Enter the API key and system ID from pvoutput.org (Settings → API Settings). The status interval and donor status are read from your account.\n\nAfter setup, open **Configure** to choose which sensors are sent.",
         "data": {
           "api_key": "API key",
@@ -20,6 +20,9 @@
     },
     "abort": {
       "already_configured": "This PVOutput system is already set up."
+    },
+    "initiate_flow": {
+      "user": "Add PV Site"
     }
   },
   "options": {
