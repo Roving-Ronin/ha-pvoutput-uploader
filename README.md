@@ -185,3 +185,7 @@ for versions such as `0.0.1b2`).
 The icon's source is [`docs/images/icon.svg`](docs/images/icon.svg); the PNGs in
 `custom_components/pvoutput_uploader/brand/` (256 and 512 px) are rendered from it.
 Home Assistant 2026.3+ shows them in place of the brands repository.
+
+## License
+
+[GNU General Public License v3.0](LICENSE).
