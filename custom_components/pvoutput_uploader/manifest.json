@@ -1,13 +1,17 @@
 {
   "domain": "pvoutput_uploader",
   "name": "PVOutput Uploader",
-  "codeowners": ["@darek-margas"],
+  "codeowners": [
+    "@darek-margas"
+  ],
   "config_flow": true,
-  "dependencies": ["recorder"],
+  "dependencies": [
+    "recorder"
+  ],
   "documentation": "https://github.com/darek-margas/ha-pvoutput-uploader",
   "integration_type": "service",
   "iot_class": "cloud_push",
   "issue_tracker": "https://github.com/darek-margas/ha-pvoutput-uploader/issues",
   "requirements": [],
-  "version": "0.0.1b6"
+  "version": "0.1.0"
 }

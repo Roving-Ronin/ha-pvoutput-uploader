@@ -1,5 +1,31 @@
 # Changelog
 
+## 0.1.0 — First stable release
+
+PVOutput Uploader sends your Home Assistant solar, consumption and battery readings to PVOutput, with field mapping and history controls in the Home Assistant UI.
+
+### Set up your PV site
+
+Use **Add PV Site**, enter your PVOutput API key and system ID, then open **Configure** to add sensor fields or fixed values. The integration reads your account's donor status and upload interval. Donor accounts can also use extended and battery fields.
+
+Each field on the PVOutput device page shows the sensor's actual friendly name and the upload unit, such as **Outside °C** or **Battery Power W**. Fixed values show their units too—for example, **5544 Wh** for battery capacity. For sensors without a reported unit, you can specify a source unit in Add field or Edit field; supported units are validated and converted for PVOutput.
+
+### Keep and recover your data
+
+- Readings are recorded into a local history log every five minutes. Uploading can be switched off while recording continues; passive fields are recorded for later use.
+- Network failures, PVOutput outages and rate limits leave data queued for automatic upload when sending can resume. The queue and retry timing survive restarts.
+- Rejected samples and daily outputs remain visible. If PVOutput identifies a rejected value, the uploader makes one attempt without that value so the other fields can still arrive; it records the result as partly sent and keeps the complete sample available for reupload.
+- **Reupload history** can start from the first unsent status or a selected date and time. **Import history from Home Assistant** uses recorded states where available, then hourly long-term statistics for older periods.
+- Status history is sent within PVOutput's account limits. Older days can be sent as daily totals. Recovery detail depends on the history still available in the integration and Home Assistant; unavailable sensor readings leave gaps rather than fabricated values.
+
+The device page includes upload, backlog, rejection and rate-limit diagnostics. The default local history retention is 91 days and can be changed in Configure.
+
+### Upgrading from a beta
+
+Update through HACS and restart Home Assistant. Existing configuration and history are retained. This release includes all changes from b6 plus the **Add PV Site** button and setup title.
+
+Unit changes apply to new readings or history you explicitly rebuild; existing logged samples are not automatically rewritten.
+
 ## 0.0.1b6 — Clearer field display and support for sensors without units
 
 The PVOutput device page now shows readable source names and the units PVOutput receives, making it easier to check your field mappings at a glance.
