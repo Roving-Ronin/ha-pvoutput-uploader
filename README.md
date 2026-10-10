@@ -2,14 +2,30 @@
 
 # PVOutput Uploader for Home Assistant
 
-Send any Home Assistant sensor to [PVOutput](https://pvoutput.org) **without ever leaving
-a gap**.
+Send your Home Assistant solar, consumption, battery and other numeric sensor readings
+to [PVOutput](https://pvoutput.org), with local recording and automatic upload recovery.
+
+## Quick start
+
+1. Add this repository to HACS as a custom repository (type *Integration*), install
+   **PVOutput Uploader** and restart Home Assistant.
+2. **Settings → Devices & services → Add integration → PVOutput Uploader**, enter the API
+   key and system ID from pvoutput.org (*Settings → API Settings*). The status interval
+   and donor status are read from your account. Use **Add PV Site** to add another system.
+3. Open **Configure → Add field** and add the sensors or fixed values to send.
+   For sensors without a unit, enter **Source / custom unit** when prompted.
+4. Optional: **Configure → Import history from Home Assistant** to fill the log for the
+   days before installing, and send them.
+
+If you already send to PVOutput with a `rest_command` automation, switch it off once the
+fields are added, so statuses are not sent twice.
 
 The integration keeps its **own history log**: every 5 minutes it stores the values of
 every configured sensor, and it keeps them for **91 days** (configurable), however short
 Home Assistant's recorder history is. Whatever stops the uploads (PVOutput down, the
 internet out, the hourly limit, uploading switched off), the data waits in the log and is
-sent as soon as PVOutput accepts it, **without you doing anything**. Like the PVOutput
+sent automatically when uploading resumes, within PVOutput's history limits. Rejected
+values may need correction and reupload. Like the PVOutput
 service of the IoTaWatt firmware, any period in the log can also be sent again.
 
 ## Where your data lives
@@ -58,7 +74,7 @@ homeassistant:
       state_class: measurement
 ```
 
-## No gaps: what happens when uploads are disrupted
+## What happens when uploads are disrupted
 
 **You do nothing** when:
 
@@ -70,7 +86,7 @@ homeassistant:
 | PVOutput does not confirm a status (a batch answers `0`, or the status lacks v1-v4 because IoTaWatt has not created it yet) | Only statuses PVOutput confirms count as sent; the rest are retried for two hours. |
 | PVOutput rejects one value of a status (power or energy too high, generation at night) | The status is sent once more without the value PVOutput named, so the other fields still arrive. It is counted as **Partly sent** and stays unsent for a reupload. Other rejections are not retried. |
 | Integration disabled, reloaded or reinstalled while Home Assistant runs, for less time than the recorder keeps states | On start, the log is filled from the recorder for the whole missed period with full 5 minute detail (about 2 days of history per minute), and the backlog is sent. |
-| Home Assistant itself off | No values exist for that time anywhere. Energy counters carry on, so **energy since midnight stays correct**: the energy of the outage is counted in the first interval after the restart. |
+| Home Assistant itself off | No sensor states are recorded during the outage. If an energy counter continues counting and its readings span the gap, the builder can recover the accumulated energy when readings resume; it cannot reconstruct individual readings during the outage. |
 
 **Daily totals are not sent routinely**: PVOutput works out each day's totals from the
 statuses. They are sent only for days too old for statuses, on request or with the
@@ -93,20 +109,6 @@ automatically.
 
 The **Samples waiting**, **Rejected samples** and **Daily outputs waiting** sensors show
 what is outstanding at any time.
-
-## Quick start
-
-1. Add this repository to HACS as a custom repository (type *Integration*), install
-   **PVOutput Uploader** and restart Home Assistant.
-2. **Settings → Devices & services → Add integration → PVOutput Uploader**, enter the API
-   key and system ID from pvoutput.org (*Settings → API Settings*). The status interval
-   and donor status are read from your account.
-3. Open **Configure → Add field** and add the sensors to send.
-4. Optional: **Configure → Import history from Home Assistant** to fill the log for the
-   days before installing, and send them.
-
-If you already send to PVOutput with a `rest_command` automation, switch it off once the
-fields are added, so statuses are not sent twice.
 
 ## Configure menu
 
@@ -136,10 +138,20 @@ Each action saves as soon as it is submitted.
 | v5 | Temperature | °C |
 | v6 | Voltage | V |
 | v7-v12 | Extended (donor) | average, last value, or energy since midnight |
-| b1-b6 | Battery power, state of charge, size, lifetime charge/discharge, state (donor) | |
+| b1 | Battery power (donor) | W |
+| b2 | Battery state of charge (donor) | % |
+| b3 | Battery size (donor) | Wh |
+| b4 / b5 | Battery lifetime charge / discharge (donor) | Wh |
+| b6 | Battery state (donor) | Numeric state code, no unit |
 
 Sensor units are converted (kWh to Wh, kW to W, °F to °C, ...). Sensors must be
 recorded by the Home Assistant recorder (they are unless you excluded them).
+
+### Field units
+
+Field rows show the source friendly name and the unit sent to PVOutput, e.g. `Outside °C`. Fixed values show their unit, e.g. `5544 Wh` for battery size. Power uses W, energy Wh, voltage V and battery state of charge %; extended fields use your chosen unit.
+
+Sensors with a unit are converted automatically. For a sensor without one, enter its actual **Source / custom unit** when adding or editing the field (e.g. kW or °F); this is used for conversion, not just a label. Leave it empty when the source reports its unit. Fixed values are entered in PVOutput units; a custom unit applies only to extended fields. Changing a unit affects newly recorded or explicitly rebuilt history; existing samples keep their recorded values.
 
 **Active and passive.** All fields are recorded; only active ones are sent. A passive
 field builds up history in the log, so you can make it active later and reupload its
@@ -210,8 +222,9 @@ is only stored, ready for a later reupload.
 The PVOutput system's device page shows what is uploaded and as what:
 
 - **One sensor per configured field**, named after the PVOutput field and your label (e.g.
-  *v5 Ambient*). Its state is the source sensor's friendly name, or the fixed
-  value. The source entity ID is available in the `source_entity` attribute. Attributes: the PVOutput field and its standard name, active or passive,
+  *v5 Ambient*). Its state is the source sensor's friendly name or fixed
+  value, followed by the upload unit (e.g. *Outside °C* or *5544 Wh*). The source entity ID is available in the `source_entity` attribute;
+  `source_unit` and `pvoutput_unit` show the source and upload units. Attributes: the PVOutput field and its standard name, active or passive,
   `configured_to_send` (active and allowed by the account type; donor-only fields on a
   standard account are not), how the 5 minute values are combined, and the last recorded
   value with its time. The icon follows `configured_to_send`. It does not show whether
@@ -263,9 +276,3 @@ Home Assistant 2026.3+ shows them in place of the brands repository.
 ## License
 
 [GNU General Public License v3.0](LICENSE).
-
-### Field units
-
-Field rows show the source friendly name and the unit sent to PVOutput, e.g. `Outside °C`. Fixed values show their unit, e.g. `5544 Wh` for battery size. Power uses W, energy Wh, voltage V and battery state of charge %; extended fields use your chosen unit.
-
-Sensors with a unit are converted automatically. For a sensor without one, enter its actual **Source / custom unit** when adding or editing the field (e.g. kW or °F); this is used for conversion, not just a label. Leave it empty when the source reports its unit. Fixed values are entered in PVOutput units; a custom unit applies only to extended fields. Changing a unit affects newly recorded or explicitly rebuilt history; existing samples keep their recorded values.
