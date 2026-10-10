@@ -5,7 +5,7 @@
 - The history log is kept for 91 days by default (was 400): the 90 days donors can send statuses for, plus today. Existing installs keep their setting (Configure → Settings → Keep history for).
 - A "last value" field is not sent when the sensor was unavailable at the end of the interval, and energy since midnight is only sent for intervals with a counter reading, so old values are not repeated as current.
 - The two hour retry for unconfirmed statuses counts from the first unconfirmed attempt, so reuploaded and imported history gets it too.
-- README: where the data lives (the history log, the recorder, long term statistics) and which disruptions need nothing from you.
+- README: where the data lives (the history log, the recorder, long term statistics) and which disruptions need nothing from you. The default limits (history log 91 days, recorder 10 days, statistics forever) and how to change them are described in the README and under the setting.
 
 ## 0.0.1b2
 

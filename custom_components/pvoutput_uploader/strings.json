@@ -155,7 +155,7 @@
         "data_description": {
           "donor_mode": "Donor accounts can send extended (v7-v12) and battery fields, upload 90 days back and 100 statuses per request.",
           "upload_interval": "Should match the status interval of the system in PVOutput. The history log always records 5 minute values.",
-          "retention_days": "Older rows of the history log are deleted once a day.",
+          "retention_days": "Default 91: the 90 days PVOutput takes statuses from donors, plus today. Older rows are deleted once a day; keep more to be able to resend older days as daily totals. How long the integration can be stopped and still catch up with full detail depends on Home Assistant's recorder (purge_keep_days, 10 days by default), not on this setting.",
           "output_fallback": "When statuses could not be sent in time (e.g. after a long outage), send that day's totals as a daily output instead. This replaces the day's totals in PVOutput."
         }
       }

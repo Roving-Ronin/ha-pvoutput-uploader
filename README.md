@@ -26,6 +26,38 @@ integration (it is named after the PVOutput system ID).
 So the recorder only has to cover the longest time the integration might not be running,
 and long term statistics are only needed for time before the integration was installed.
 
+### How long data is kept, and how to change it
+
+**History log: 91 days by default.** That is the 90 days PVOutput accepts statuses from
+donor accounts, plus today; standard accounts can send statuses for 14 days. Older rows
+are deleted once a day. Change it under **Configure → Settings → Keep history for**
+(30 to 3650 days). Keep it longer if you want to be able to resend older days as daily
+totals. The log is small: about 105,000 rows a year (288 a day), a few MB.
+
+**Home Assistant recorder: 10 days by default.** This is Home Assistant's
+`purge_keep_days`, not a setting of this integration. It decides how long the integration
+can be stopped (disabled, broken, being reinstalled) and still fill the log with full 5
+minute detail when it runs again. To cover longer stops, raise it in `configuration.yaml`:
+
+```yaml
+recorder:
+  purge_keep_days: 20
+```
+
+A longer recorder history makes Home Assistant's database bigger, for all entities, not
+only these sensors.
+
+**Long term statistics: kept forever**, but only for sensors with a `state_class` (most
+energy and power sensors have one; some temperature sensors do not). They are used only by
+**Import history**. To make sure a sensor gets them from now on, give it a state class:
+
+```yaml
+homeassistant:
+  customize:
+    sensor.outside_temperature:
+      state_class: measurement
+```
+
 ## No gaps: what happens when uploads are disrupted
 
 **You do nothing** when:
