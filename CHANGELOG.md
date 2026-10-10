@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.1.2
+
+- Prepare for inclusion in the default HACS catalogue: enable all HACS validation checks without exceptions.
+- No change to uploader behaviour compared with 0.1.1.
+
 ## 0.1.1
 
 - PVOutput requests are sent at least 0.3 seconds apart, so a backlog (for example after uploading was switched off) goes out at a steady pace instead of in a burst. The hourly request limit still sets how fast a backlog clears.
