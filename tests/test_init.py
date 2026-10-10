@@ -230,3 +230,51 @@ async def test_history_from_the_menu(
     assert result["description_placeholders"] == {"from_states": "0", "from_statistics": "0"}
 
     assert await hass.config_entries.async_unload(entry.entry_id)
+
+
+async def test_field_sensors(recorder_mock, hass: HomeAssistant, entry: MockConfigEntry) -> None:
+    hass.states.async_set(
+        "sensor.outside", "20", {"unit_of_measurement": "°C", "friendly_name": "Outside"}
+    )
+    fields = [
+        {
+            "field": "v5", "entity_id": "sensor.outside", "constant": None,
+            "name": "Ambient", "active": True, "aggregate": "average",
+        },
+        {
+            "field": "b3", "entity_id": None, "constant": 5544.0,
+            "name": "Battery Size", "active": True, "aggregate": "last",
+        },
+    ]
+    hass.config_entries.async_update_entry(
+        entry, options=dict(entry.options) | {"fields": fields}
+    )
+    with patch(GET_SYSTEM, AsyncMock(return_value=SystemInfo("My System", 5, False))):
+        await _setup(hass, entry)
+
+    v5 = hass.states.get("sensor.my_system_v5_ambient")
+    assert v5.state == "sensor.outside"
+    assert v5.attributes["pvoutput_field"] == "v5"
+    assert v5.attributes["pvoutput_field_name"] == "Temperature"
+    assert v5.attributes["source"] == "sensor"
+    assert v5.attributes["source_name"] == "Outside"
+    assert v5.attributes["value_per_interval"] == "average"
+    assert v5.attributes["sent"] is True
+
+    b3 = hass.states.get("sensor.my_system_b3_battery_size")
+    assert b3.state == "5544"
+    assert b3.attributes["source"] == "fixed value"
+    # A battery field on a standard account is kept but not sent.
+    assert b3.attributes["sent"] is False
+    assert b3.attributes["not_sent_because"] == "needs a PVOutput donor account"
+
+    # Removing a field removes its sensor.
+    with patch(GET_SYSTEM, AsyncMock(return_value=SystemInfo("My System", 5, False))):
+        hass.config_entries.async_update_entry(
+            entry, options=dict(entry.options) | {"fields": fields[:1]}
+        )
+        await hass.async_block_till_done(wait_background_tasks=True)
+    assert hass.states.get("sensor.my_system_b3_battery_size") is None
+    assert hass.states.get("sensor.my_system_v5_ambient") is not None
+
+    assert await hass.config_entries.async_unload(entry.entry_id)

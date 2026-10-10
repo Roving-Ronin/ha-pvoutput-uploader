@@ -1,4 +1,4 @@
-"""Status sensors for PVOutput Uploader."""
+"""Sensors for PVOutput Uploader: one per configured field, plus status."""
 
 from __future__ import annotations
 
@@ -13,14 +13,29 @@ from homeassistant.components.sensor import (
     SensorEntityDescription,
     SensorStateClass,
 )
-from homeassistant.const import EntityCategory
+from homeassistant.const import (
+    EntityCategory,
+    UnitOfElectricPotential,
+    UnitOfPower,
+    UnitOfTemperature,
+)
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 from homeassistant.util import dt as dt_util
 
-from .coordinator import PVOutputConfigEntry
+from .const import (
+    AGG_ENERGY_TODAY,
+    CONF_SYSTEM_ID,
+    FIELDS_BY_KEY,
+    KIND_ENERGY,
+    KIND_POWER,
+    KIND_TEMPERATURE,
+    KIND_VOLTAGE,
+)
+from .coordinator import PVOutputConfigEntry, PVOutputCoordinator
 from .entity import PVOutputEntity
-from .uploader import Uploader
+from .uploader import FieldMapping, Uploader
 
 
 def _ts(value: float | None) -> datetime | None:
@@ -38,16 +53,19 @@ SENSORS = (
     PVOutputSensorDescription(
         key="last_upload",
         device_class=SensorDeviceClass.TIMESTAMP,
+        entity_category=EntityCategory.DIAGNOSTIC,
         value_fn=lambda u: u.last_upload,
     ),
     PVOutputSensorDescription(
         key="pending_samples",
         state_class=SensorStateClass.MEASUREMENT,
+        entity_category=EntityCategory.DIAGNOSTIC,
         value_fn=lambda u: u.summary.get("pending"),
     ),
     PVOutputSensorDescription(
         key="queued_outputs",
         state_class=SensorStateClass.MEASUREMENT,
+        entity_category=EntityCategory.DIAGNOSTIC,
         value_fn=lambda u: u.summary.get("queued_outputs"),
     ),
     PVOutputSensorDescription(
@@ -104,9 +122,23 @@ async def async_setup_entry(
     entry: PVOutputConfigEntry,
     async_add_entities: AddConfigEntryEntitiesCallback,
 ) -> None:
-    """Set up the status sensors."""
+    """Set up the field and status sensors."""
+    coordinator = entry.runtime_data
+    fields = [
+        FieldSensor(coordinator, mapping) for mapping in coordinator.uploader.mappings
+    ]
+    # Drop the sensors of fields that were removed.
+    wanted = {sensor.unique_id for sensor in fields}
+    prefix = f"{entry.data[CONF_SYSTEM_ID]}_field_"
+    registry = er.async_get(hass)
+    for reg_entry in er.async_entries_for_config_entry(registry, entry.entry_id):
+        if reg_entry.unique_id.startswith(prefix) and reg_entry.unique_id not in wanted:
+            registry.async_remove(reg_entry.entity_id)
     async_add_entities(
-        PVOutputSensor(entry.runtime_data, description) for description in SENSORS
+        [
+            *fields,
+            *(PVOutputSensor(coordinator, description) for description in SENSORS),
+        ]
     )
 
 
@@ -129,3 +161,79 @@ class PVOutputSensor(PVOutputEntity, SensorEntity):
     def native_value(self) -> Any:
         """Return the value."""
         return self.entity_description.value_fn(self.coordinator.uploader)
+
+
+# What a field's 5 minute values are recorded in.
+RECORDED_UNITS = {
+    KIND_ENERGY: "Wh per 5 minutes",
+    KIND_POWER: UnitOfPower.WATT,
+    KIND_TEMPERATURE: UnitOfTemperature.CELSIUS,
+    KIND_VOLTAGE: UnitOfElectricPotential.VOLT,
+}
+
+
+def _number(value: float) -> str:
+    return f"{value:g}"
+
+
+class FieldSensor(PVOutputEntity, SensorEntity):
+    """A configured PVOutput field: what is sent, and where it comes from.
+
+    The state is the Home Assistant sensor the field reads, or the fixed value.
+    """
+
+    def __init__(self, coordinator: PVOutputCoordinator, mapping: FieldMapping) -> None:
+        """Initialize the sensor."""
+        super().__init__(coordinator, f"field_{mapping.field}")
+        self._attr_translation_key = None
+        self._attr_name = f"{mapping.field} {mapping.name}"
+        self.mapping = mapping
+
+    @property
+    def available(self) -> bool:
+        """The configuration is always known."""
+        return True
+
+    @property
+    def _sent(self) -> bool:
+        return self.mapping in self.coordinator.uploader.active_mappings
+
+    @property
+    def icon(self) -> str:
+        """Show whether the field is sent."""
+        return "mdi:upload" if self._sent else "mdi:upload-off"
+
+    @property
+    def native_value(self) -> str:
+        """Return the source sensor, or the fixed value."""
+        if self.mapping.entity_id:
+            return self.mapping.entity_id
+        return _number(self.mapping.constant or 0)
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        """Describe how the field is sent."""
+        m = self.mapping
+        field = FIELDS_BY_KEY[m.field]
+        uploader = self.coordinator.uploader
+        attrs: dict[str, Any] = {
+            "pvoutput_field": m.field,
+            "pvoutput_field_name": field.name,
+            "source": "sensor" if m.entity_id else "fixed value",
+            "active": m.active,
+            "sent": self._sent,
+        }
+        if m.active and not self._sent:
+            attrs["not_sent_because"] = "needs a PVOutput donor account"
+        if m.entity_id:
+            if (state := self.hass.states.get(m.entity_id)) is not None:
+                attrs["source_name"] = state.name
+            attrs["value_per_interval"] = m.aggregate
+            if (latest := uploader.latest.get(m.field)) is not None:
+                ts, value = latest
+                attrs["last_recorded"] = dt_util.utc_from_timestamp(ts).isoformat()
+                attrs["last_recorded_value"] = round(value, 3)
+                kind = KIND_ENERGY if m.aggregate == AGG_ENERGY_TODAY else field.kind
+                if (unit := RECORDED_UNITS.get(kind)) is not None:
+                    attrs["last_recorded_unit"] = unit
+        return attrs

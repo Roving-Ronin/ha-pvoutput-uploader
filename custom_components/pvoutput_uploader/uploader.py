@@ -171,6 +171,8 @@ class Uploader:
         self.last_upload: datetime | None = None
         self.last_error: str | None = None
         self.summary: dict[str, Any] = {}
+        # Field key -> (timestamp, value) of its latest recorded value.
+        self.latest: dict[str, tuple[int, float]] = {}
         self._batch_limit = self.batch_size
 
     # Settings
@@ -230,12 +232,16 @@ class Uploader:
     async def _run(self, func: Callable[..., _T], *args: Any, **kwargs: Any) -> _T:
         return await self.hass.async_add_executor_job(partial(func, *args, **kwargs))
 
+    async def _refresh_summary(self) -> None:
+        self.summary = await self._run(self.store.summary)
+        self.latest = await self._run(self.store.latest_values)
+
     async def async_load(self) -> None:
         """Restore state kept in the log database."""
         paused = await self._run(self.store.get_meta, META_PAUSED_UNTIL)
         if paused:
             self.paused_until = float(paused)
-        self.summary = await self._run(self.store.summary)
+        await self._refresh_summary()
 
     # Main cycle
 
@@ -254,7 +260,7 @@ class Uploader:
                     self.last_error = str(err)
                     _LOGGER.warning("PVOutput upload stopped: %s", err)
             await self._async_housekeeping()
-            self.summary = await self._run(self.store.summary)
+            await self._refresh_summary()
 
     async def _async_record(self) -> None:
         target = _align_down(time.time() - SETTLE_SECONDS, LOG_INTERVAL)
@@ -666,7 +672,7 @@ class Uploader:
                     day += timedelta(days=1)
                 await self._queue_days(output_days)
             self._batch_limit = self.batch_size
-            self.summary = await self._run(self.store.summary)
+            await self._refresh_summary()
         return {"status_days": status_days, "output_days": len(output_days)}
 
     async def async_import(
@@ -713,5 +719,5 @@ class Uploader:
                     s.uploaded = state
                 await self._run(self.store.add_samples, samples)
                 from_stats += len(samples)
-            self.summary = await self._run(self.store.summary)
+            await self._refresh_summary()
         return {"from_states": from_states, "from_statistics": from_stats}

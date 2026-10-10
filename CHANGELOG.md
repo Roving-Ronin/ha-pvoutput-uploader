@@ -2,6 +2,7 @@
 
 ## 0.0.1b4
 
+- One sensor per configured field on the PVOutput system's device: named after the PVOutput field and its label, showing the Home Assistant sensor it reads (or the fixed value), whether it is sent, how values are combined and the last recorded value. The status sensors moved to Diagnostic, so the device's Sensors card lists exactly what is uploaded.
 - A daily output PVOutput rejects stays in the log as rejected, shown in the new **Rejected daily outputs** sensor, instead of disappearing from the queue; reuploading the day sends it again. A rejected output no longer counts as an upload.
 - The start of the two hour retry window for unconfirmed statuses is kept in the history log, so restarts and option changes do not start it again.
 - README: daily totals are only sent for days too old for statuses; PVOutput works out the totals of other days from the statuses.

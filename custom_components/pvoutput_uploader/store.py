@@ -207,6 +207,18 @@ class SampleStore:
         self._execute("DELETE FROM samples WHERE ts < ?", (before,))
         self._execute("DELETE FROM unconfirmed WHERE slot < ?", (before,))
 
+    def latest_values(self) -> dict[str, tuple[int, float]]:
+        """Return the latest recorded (timestamp, value) of each field."""
+        latest = {}
+        for key in FIELD_KEYS:
+            rows = self._execute(
+                f"SELECT ts, {key} FROM samples WHERE {key} IS NOT NULL"
+                " ORDER BY ts DESC LIMIT 1"
+            )
+            if rows:
+                latest[key] = (rows[0][0], rows[0][1])
+        return latest
+
     # Daily output queue
 
     def queue_outputs(self, days: Iterable[str]) -> None:

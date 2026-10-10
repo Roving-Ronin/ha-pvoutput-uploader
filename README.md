@@ -206,11 +206,18 @@ is only stored, ready for a later reupload.
 
 ## Entities
 
+The PVOutput system's device page shows what is uploaded and as what:
+
+- **One sensor per configured field**, named after the PVOutput field and your label (e.g.
+  *v5 Ambient*). Its state is the Home Assistant sensor the field reads, or the fixed
+  value. Attributes: the PVOutput field and its standard name, active or passive, whether
+  it is actually sent (donor-only fields on a standard account are not), how the 5 minute
+  values are combined, and the last recorded value with its time. The icon shows whether
+  the field is sent.
 - **Uploading** switch: stops sending while recording carries on.
-- Sensors: last upload, samples waiting, daily outputs waiting, rejected samples,
-  rejected daily outputs,
-  history size and start, requests left this hour, rate limit pause, account type, last
-  error.
+- Diagnostic sensors: last upload, samples waiting, daily outputs waiting, rejected
+  samples, rejected daily outputs, history size and start, requests left this hour, rate
+  limit pause, account type, last error.
 
 ## Settings
 
