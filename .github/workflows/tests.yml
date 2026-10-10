@@ -1,0 +1,53 @@
+name: Tests
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+  # The release workflow runs these same jobs before it publishes.
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  tests:
+    # The integration in a test Home Assistant (pytest-homeassistant-custom-component),
+    # on the Python version current Home Assistant needs.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+      - name: Install Home Assistant test harness
+        run: pip install pytest-homeassistant-custom-component ruff
+      - name: Install the recorder's requirements
+        # The integration reads history through the recorder, whose libraries
+        # (SQLAlchemy, ...) Home Assistant installs only when the recorder is used.
+        run: |
+          set -euo pipefail
+          mapfile -t REQS < <(python -c 'import importlib.util, json, pathlib; p = pathlib.Path(importlib.util.find_spec("homeassistant").origin).parent / "components" / "recorder" / "manifest.json"; print("\n".join(json.loads(p.read_text())["requirements"]))')
+          echo "Recorder requires: ${REQS[*]}"
+          pip install "${REQS[@]}"
+      - name: Lint (errors only)
+        run: ruff check --select E9,F custom_components tests
+      - name: Run tests
+        run: python -m pytest -v tests
+
+  hassfest:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: home-assistant/actions/hassfest@master
+
+  hacs:
+    # HACS' own checks: repository layout, hacs.json, manifest, and the GitHub
+    # repository description and topics. The brands check is skipped: the
+    # integration has no logo in home-assistant/brands.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: hacs/action@main
+        with:
+          category: integration
+          ignore: brands

@@ -2,7 +2,7 @@ name: Release
 
 # Releasing is a push: bump "version" in custom_components/pvoutput_uploader/manifest.json
 # and add a "## <version>" section to CHANGELOG.md, then push to main. This workflow
-# compiles the code and runs hassfest and, if they pass, creates tag v<version> and a
+# runs the tests, hassfest and the HACS checks (tests.yml) and, if they pass, creates tag v<version> and a
 # GitHub release with that changelog section as notes. It runs on every push to main, so
 # a failed release is retried by the push that fixes it; once a version is released,
 # later pushes only refresh its notes, and the tag is never moved.
@@ -13,36 +13,22 @@ name: Release
 on:
   push:
     branches: [main]
-  pull_request:
   workflow_dispatch:
 
 permissions:
   contents: write
 
 concurrency:
-  group: release-${{ github.ref }}
+  group: release
   cancel-in-progress: false
 
 jobs:
-  compile:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.13"
-      - name: Byte-compile
-        run: python -m compileall -q custom_components
-
-  hassfest:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: home-assistant/actions/hassfest@master
+  test:
+    uses: ./.github/workflows/tests.yml
 
   release:
-    needs: [compile, hassfest]
-    if: github.event_name != 'pull_request' && github.ref_name == 'main'
+    needs: [test]
+    if: github.ref_name == 'main'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

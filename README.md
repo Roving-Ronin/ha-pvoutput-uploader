@@ -85,3 +85,20 @@ on they are sent like any other backlog.
 - Daily output fallback: when statuses become too old to send, send that day's
   totals as a daily output instead (off by default, because it overwrites the day's
   output in PVOutput)
+
+## Development
+
+Tests run in a test Home Assistant:
+
+```bash
+pip install pytest-homeassistant-custom-component
+python -m pytest tests
+```
+
+The recorder's libraries (SQLAlchemy and others, listed in Home Assistant's
+`components/recorder/manifest.json`) must be installed too; CI does this.
+
+Releasing: bump `version` in `manifest.json`, add a `## <version>` section to
+`CHANGELOG.md` and push to `main`. When the tests, hassfest and the HACS checks pass,
+the release workflow tags `v<version>` and publishes a GitHub release (a pre-release
+for versions such as `0.0.1b1`).
