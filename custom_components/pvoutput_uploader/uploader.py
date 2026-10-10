@@ -59,6 +59,7 @@ from .const import (
     UNCONFIRMED_RETRY_SECONDS,
     OUTPUT_BATCH_DONOR,
     RATE_RESERVE,
+    REQUEST_SPACING_SECONDS,
     SETTLE_SECONDS,
     STATUS_BATCH_DONOR,
     STATUS_BATCH_STANDARD,
@@ -68,6 +69,8 @@ from .const import (
 from .store import DONE, EXPIRED, FAILED, PARTIAL, PENDING, Sample, SampleStore
 
 _LOGGER = logging.getLogger(__name__)
+# Indirection so tests can check the pacing without sleeping.
+_sleep = asyncio.sleep
 _T = TypeVar("_T")
 
 META_LAST_BUILT = "last_built"
@@ -184,6 +187,8 @@ class Uploader:
         # Field key -> (timestamp, value) of its latest recorded value.
         self.latest: dict[str, tuple[int, float]] = {}
         self._batch_limit = self.batch_size
+        self.request_spacing = REQUEST_SPACING_SECONDS
+        self._last_request = 0.0
 
     # Settings
 
@@ -291,6 +296,13 @@ class Uploader:
             await self._run(self.store.set_meta, META_LAST_BUILT, str(last))
 
     # Rate limit
+
+    async def _pace(self) -> None:
+        """Leave at least ``request_spacing`` seconds between PVOutput requests."""
+        wait = self._last_request + self.request_spacing - time.monotonic()
+        if wait > 0:
+            await _sleep(wait)
+        self._last_request = time.monotonic()
 
     def _rate_ok(self) -> bool:
         now = time.time()
@@ -443,10 +455,12 @@ class Uploader:
         if single:
             slot, values = entries[0]
             local = _local(slot)
+            await self._pace()
             await self.client.add_status(
                 {"d": local.strftime("%Y%m%d"), "t": local.strftime("%H:%M")} | values
             )
             return {slot}
+        await self._pace()
         answer = await self.client.add_batch_status(
             [self._batch_line(slot, values) for slot, values in entries]
         )
@@ -629,6 +643,7 @@ class Uploader:
                     outputs.append(params)
             if not outputs:
                 continue
+            await self._pace()
             try:
                 if len(outputs) == 1:
                     await self.client.add_output(outputs[0])
@@ -657,6 +672,7 @@ class Uploader:
         """Send one daily output. Return whether to keep going this cycle."""
         if not self._rate_ok():
             return False
+        await self._pace()
         try:
             await self.client.add_output(params)
         except PVOutputRateLimited as err:

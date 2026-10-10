@@ -126,6 +126,8 @@ MAX_CHUNKS_PER_CYCLE: Final = 8
 MAX_REQUESTS_PER_CYCLE: Final = 10
 # Requests kept in hand from the hourly limit.
 RATE_RESERVE: Final = 2
+# At least this long between PVOutput requests (0.3 s), so a backlog is not sent in a burst.
+REQUEST_SPACING_SECONDS: Final = 0.3
 # A status PVOutput did not confirm (batch status 0, or rejected for lacking v1-v4
 # while another uploader such as IoTaWatt has not created it yet) is retried in
 # later cycles for this long before it counts as rejected.

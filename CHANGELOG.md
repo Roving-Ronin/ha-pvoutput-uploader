@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.1
+
+- PVOutput requests are sent at least 0.3 seconds apart, so a backlog (for example after uploading was switched off) goes out at a steady pace instead of in a burst. The hourly request limit still sets how fast a backlog clears.
+
 ## 0.1.0 — First stable release
 
 PVOutput Uploader sends your Home Assistant solar, consumption and battery readings to PVOutput, with field mapping and history controls in the Home Assistant UI.

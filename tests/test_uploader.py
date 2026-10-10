@@ -120,6 +120,7 @@ async def make(
     store = SampleStore(str(tmp_path / "log.db"))
     await hass.async_add_executor_job(store.open)
     up = Uploader(hass, entry, FakeClient(), store)  # type: ignore[arg-type]
+    up.request_spacing = 0  # tests do not wait between requests
     await up.async_load()
     return up
 
@@ -607,6 +608,7 @@ async def test_retry_window_survives_restart(
     # Home Assistant restarts (or the options are saved) at 11:30.
     now.move_to(local_dt(10, 10, 11, 30))
     again = Uploader(hass, up.entry, up.client, up.store)
+    again.request_spacing = 0
     await again.async_load()
     await again._async_upload_statuses()
     assert (await states(again, 0, 2**40))[ts] == PENDING
@@ -735,3 +737,23 @@ async def test_no_retry_when_only_fixed_values_would_be_left(
     await up._async_upload_statuses()
     assert attempts[0] == 1
     assert (await states(up, 0, 2**40))[ts] == FAILED
+
+
+async def test_requests_are_spaced(
+    hass: HomeAssistant, tmp_path: Path, now: FrozenDateTimeFactory
+) -> None:
+    up = await make(hass, tmp_path, [field("v5"), field("b1")], donor=True)
+    times = [local_ts(10, 10, 10, m) for m in (5, 10, 15)]
+    await add(up, *(Sample(t, {"v5": 20.0, "b1": 100.0}) for t in times), last_built=times[-1])
+    up.request_spacing = 5
+    waits: list[float] = []
+
+    async def fake_sleep(seconds: float) -> None:
+        waits.append(seconds)
+
+    with patch.object(uploader_module, "_sleep", side_effect=fake_sleep):
+        await up._async_upload_statuses()
+    # Battery fields: one request per status, the second and third wait.
+    assert len(up.client.singles) == 3
+    assert len(waits) == 2
+    assert all(4 < w <= 5 for w in waits)
