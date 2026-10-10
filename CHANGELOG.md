@@ -1,5 +1,28 @@
 # Changelog
 
+## 0.0.1b6 — Clearer field display and support for sensors without units
+
+The PVOutput device page now shows readable source names and the units PVOutput receives, making it easier to check your field mappings at a glance.
+
+### Friendly names and visible units
+
+- Sensor-backed fields use the selected Home Assistant entity's actual friendly name instead of its entity ID. The original ID remains available in the `source_entity` attribute.
+- Field states include the upload unit: for example, **Outside °C**, **Battery Power W**, and a fixed battery capacity of **5544 Wh**. Battery state of charge shows **%**.
+- The `pvoutput_unit` and `source_unit` attributes distinguish the upload unit from the sensor's unit. Supported source units are converted to the units PVOutput expects.
+
+### Sensors without a unit
+
+- **Add field** and **Edit field** now let you specify a **Source / custom unit** when a sensor does not report one, such as **kW**, **kWh**, or **°F**. The sensor's own unit takes precedence when present.
+- Units are checked before saving standard fields. A unitless temperature sensor configured as °F is converted to °C; a unitless power sensor configured as kW is converted to W.
+- Explicit source units are also respected when importing history whose statistics metadata has no unit, without converting already-normalized statistics twice.
+- Extended fields can use custom units. Fixed values for standard fields are entered directly in PVOutput's expected unit—for example, battery capacity in **Wh**.
+
+### Upgrading
+
+Update through HACS and restart Home Assistant. Existing mappings remain compatible; use **Configure → Edit field** to supply a missing sensor unit if needed.
+
+Unit changes apply to newly recorded or explicitly rebuilt history. Samples already stored in the integration's history log are not automatically rewritten.
+
 ## 0.0.1b5
 
 - When PVOutput rejects a status for a value it names (power or energy too high, generation at night), the status is sent once more without that value, so the other fields still arrive. It counts as **Partly sent** (new diagnostic sensor) and stays unsent, so **Reupload history → since the first unsent status** sends it whole once fixed. Other rejections are not retried.
