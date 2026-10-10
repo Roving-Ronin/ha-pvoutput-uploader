@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.0.1b3
+
+- The history log is kept for 91 days by default (was 400): the 90 days donors can send statuses for, plus today. Existing installs keep their setting (Configure → Settings → Keep history for).
+- A "last value" field is not sent when the sensor was unavailable at the end of the interval, and energy since midnight is only sent for intervals with a counter reading, so old values are not repeated as current.
+- The two hour retry for unconfirmed statuses counts from the first unconfirmed attempt, so reuploaded and imported history gets it too.
+- README: where the data lives (the history log, the recorder, long term statistics) and which disruptions need nothing from you.
+
 ## 0.0.1b2
 
 - Configure menu reworked: **Add field** asks first whether the value comes from a sensor or is a fixed value; editing a field shows only the inputs of its kind; every action saves when submitted (no separate save step); explanations on every screen.
@@ -9,9 +16,6 @@
 - Only statuses PVOutput confirms (`1` in the batch answer) count as sent; unconfirmed ones, and statuses refused with "Missing energy and power values" while another uploader has not created them yet, are retried for two hours.
 - Batches of daily outputs go to `addoutput.jsp` (there is no `addbatchoutput.jsp`).
 - An unavailable sensor leaves a gap: no last value and no energy for a slot without a counter reading, instead of repeating an old reading or logging zero.
-- The history log is kept for 91 days by default (was 400): the 90 days donors can send statuses for, plus today. Existing installs keep their setting (Configure → Settings → Keep history for).
-- Slots where a sensor was unavailable at the end are not sent with its old last value, and energy since midnight is only sent for intervals with a counter reading.
-- The two hour retry for unconfirmed statuses counts from the first unconfirmed attempt, so reuploaded and imported history gets it too.
 - Tests for the builder, store, API client, uploader, flows, setup and actions; releases now wait for them, hassfest and the HACS checks.
 
 ## 0.0.1b1
