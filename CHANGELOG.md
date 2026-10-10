@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.0.1b4
+
+- A daily output PVOutput rejects stays in the log as rejected, shown in the new **Rejected daily outputs** sensor, instead of disappearing from the queue; reuploading the day sends it again. A rejected output no longer counts as an upload.
+- The start of the two hour retry window for unconfirmed statuses is kept in the history log, so restarts and option changes do not start it again.
+- README: daily totals are only sent for days too old for statuses; PVOutput works out the totals of other days from the statuses.
+
 ## 0.0.1b3
 
 - The history log is kept for 91 days by default (was 400): the 90 days donors can send statuses for, plus today. Existing installs keep their setting (Configure → Settings → Keep history for).

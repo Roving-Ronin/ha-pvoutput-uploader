@@ -172,8 +172,6 @@ class Uploader:
         self.last_error: str | None = None
         self.summary: dict[str, Any] = {}
         self._batch_limit = self.batch_size
-        # When each slot was first not confirmed by PVOutput, for the retry window.
-        self._unconfirmed_since: dict[int, float] = {}
 
     # Settings
 
@@ -426,7 +424,6 @@ class Uploader:
 
             for slot, _ in entries:
                 if slot in confirmed:
-                    self._unconfirmed_since.pop(slot, None)
                     await self._mark_slot(slot, DONE)
                 else:
                     await self._unconfirmed(slot, "PVOutput did not add the status", deferred)
@@ -467,13 +464,13 @@ class Uploader:
         statuses (backlog, reupload, import) get the same retries as new ones.
         """
         now = time.time()
-        first = self._unconfirmed_since.setdefault(slot, now)
+        # Kept in the log, so restarts and reloads do not start the window again.
+        first = await self._run(self.store.unconfirmed_since, slot, now)
         if now - first < UNCONFIRMED_RETRY_SECONDS:
             deferred.add(slot)
             self.last_error = f"{_local(slot).isoformat()}: {message}, will retry"
             return
         await self._mark_slot(slot, FAILED)
-        self._unconfirmed_since.pop(slot, None)
         self.last_error = f"{_local(slot).isoformat()}: {message}"
         _LOGGER.warning("PVOutput did not take the status for %s: %s", _local(slot), message)
 
@@ -580,27 +577,37 @@ class Uploader:
                 if len(outputs) > 1:
                     # Send this lot one by one to find the bad day.
                     for params in outputs:
-                        await self._send_single_output(params)
+                        if not await self._send_single_output(params):
+                            return
                     continue
-                self.last_error = f"Output {outputs[0]['d']}: {err}"
-                _LOGGER.warning("PVOutput rejected output %s: %s", outputs[0]["d"], err)
+                await self._reject_output(outputs[0]["d"], str(err))
+                continue
             await self._run(
                 self.store.dequeue_outputs, [p["d"] for p in outputs]
             )
             self.last_upload = dt_util.utcnow()
 
-    async def _send_single_output(self, params: dict[str, str]) -> None:
+    async def _send_single_output(self, params: dict[str, str]) -> bool:
+        """Send one daily output. Return whether to keep going this cycle."""
         if not self._rate_ok():
-            return
+            return False
         try:
             await self.client.add_output(params)
         except PVOutputRateLimited as err:
             await self._pause(err.reset, str(err))
-            return
+            return False
         except PVOutputBadRequest as err:
-            self.last_error = f"Output {params['d']}: {err}"
-            _LOGGER.warning("PVOutput rejected output %s: %s", params["d"], err)
+            await self._reject_output(params["d"], str(err))
+            return True
         await self._run(self.store.dequeue_outputs, [params["d"]])
+        self.last_upload = dt_util.utcnow()
+        return True
+
+    async def _reject_output(self, day: str, message: str) -> None:
+        """Keep a rejected day, with the reason, until it is reuploaded on purpose."""
+        await self._run(self.store.reject_output, day, message)
+        self.last_error = f"Daily output {day}: {message}"
+        _LOGGER.warning("PVOutput rejected the daily output for %s: %s", day, message)
 
     @staticmethod
     def _output_line(p: dict[str, str]) -> str:

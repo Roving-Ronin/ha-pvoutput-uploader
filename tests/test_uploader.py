@@ -592,3 +592,70 @@ async def test_old_statuses_get_the_full_retry_window(
     now.move_to(local_dt(10, 10, 12, 30))
     await up._async_upload_statuses()
     assert (await states(up, 0, 2**40))[old] == FAILED
+
+
+async def test_retry_window_survives_restart(
+    hass: HomeAssistant, tmp_path: Path, now: FrozenDateTimeFactory
+) -> None:
+    up = await make(hass, tmp_path, [field("v2")])
+    ts = local_ts(10, 10, 10, 5)
+    await add(up, Sample(ts, {"v2": 100.0}), last_built=local_ts(10, 10, 10, 15))
+    up.client.not_added = {"10:05"}
+    await up._async_upload_statuses()  # first unconfirmed attempt at 10:20
+
+    # Home Assistant restarts (or the options are saved) at 11:30.
+    now.move_to(local_dt(10, 10, 11, 30))
+    again = Uploader(hass, up.entry, up.client, up.store)
+    await again.async_load()
+    await again._async_upload_statuses()
+    assert (await states(again, 0, 2**40))[ts] == PENDING
+
+    # Two hours after the first attempt, not after the restart.
+    now.move_to(local_dt(10, 10, 12, 25))
+    await again._async_upload_statuses()
+    assert (await states(again, 0, 2**40))[ts] == FAILED
+
+
+async def test_rejected_daily_output_is_kept(
+    hass: HomeAssistant, tmp_path: Path, now: FrozenDateTimeFactory
+) -> None:
+    up = await make(hass, tmp_path, [field("v1", aggregate=AGG_ENERGY_TODAY)])
+    await add(up, Sample(local_ts(10, 1, 12, 0), {"v1": 100.0}, DONE))
+    await up._run(up.store.queue_outputs, ["20261001"])
+    up.client.fail = lambda kind, payload: PVOutputBadRequest("Bad request 400: Invalid")
+
+    await up._async_upload_outputs()
+    assert await up._run(up.store.queued_outputs, 10) == []
+    assert await up._run(up.store.rejected_outputs) == [("20261001", "Bad request 400: Invalid")]
+    assert up.last_upload is None
+    assert "20261001" in (up.last_error or "")
+
+    # A reupload queues it again, and it is sent once PVOutput takes it.
+    up.client.fail = None
+    await up.async_reupload(local_dt(10, 1), date(2026, 10, 1), "outputs")
+    await up._async_upload_outputs()
+    assert [p["d"] for p in up.client.outputs] == ["20261001"]
+    assert await up._run(up.store.rejected_outputs) == []
+    assert up.last_upload is not None
+
+
+async def test_one_bad_day_in_a_batch_of_outputs(
+    hass: HomeAssistant, tmp_path: Path, now: FrozenDateTimeFactory
+) -> None:
+    up = await make(hass, tmp_path, [field("v1", aggregate=AGG_ENERGY_TODAY)], donor=True)
+    await add(
+        up,
+        Sample(local_ts(10, 1, 12, 0), {"v1": 100.0}, DONE),
+        Sample(local_ts(10, 2, 12, 0), {"v1": 200.0}, DONE),
+    )
+    await up._run(up.store.queue_outputs, ["20261001", "20261002"])
+
+    def fail(kind: str, payload: Any) -> Exception | None:
+        text = ";".join(payload) if isinstance(payload, list) else payload["d"]
+        return PVOutputBadRequest("Bad request 400: Invalid") if "20261002" in text else None
+
+    up.client.fail = fail
+    await up._async_upload_outputs()
+    assert [p["d"] for p in up.client.outputs] == ["20261001"]
+    assert await up._run(up.store.queued_outputs, 10) == []
+    assert [d for d, _ in await up._run(up.store.rejected_outputs)] == ["20261002"]

@@ -71,6 +71,10 @@ homeassistant:
 | Integration disabled, reloaded or reinstalled while Home Assistant runs, for less time than the recorder keeps states | On start, the log is filled from the recorder for the whole missed period with full 5 minute detail (about 2 days of history per minute), and the backlog is sent. |
 | Home Assistant itself off | No values exist for that time anywhere. Energy counters carry on, so **energy since midnight stays correct**: the energy of the outage is counted in the first interval after the restart. |
 
+**Daily totals are not sent routinely**: PVOutput works out each day's totals from the
+statuses. They are sent only for days too old for statuses, on request or with the
+fallback setting below.
+
 **PVOutput's own limit:** it takes statuses only for the last **14 days** (**90** for
 donors). A backlog older than that stays in the log; send it as daily totals with
 **Reupload history**, or turn on the *daily output fallback* setting to do that
@@ -81,6 +85,7 @@ automatically.
 | Situation | Action |
 |---|---|
 | PVOutput rejected a status (shown in **Rejected samples**) | **Reupload history → since the first unsent status** |
+| PVOutput rejected a daily total (shown in **Rejected daily outputs**) | **Reupload history** for that day, sent as daily totals |
 | You want a period sent again (e.g. a field was made active, or PVOutput data was edited) | **Reupload history → from a date and time** |
 | The integration was not running for longer than the recorder keeps states | **Import history from Home Assistant** fills the rest from hourly statistics (sensors without a `state_class` have none) |
 | You want PVOutput filled for the time before installing | **Import history from Home Assistant** with *Send to PVOutput* on |
@@ -203,6 +208,7 @@ is only stored, ready for a later reupload.
 
 - **Uploading** switch: stops sending while recording carries on.
 - Sensors: last upload, samples waiting, daily outputs waiting, rejected samples,
+  rejected daily outputs,
   history size and start, requests left this hour, rate limit pause, account type, last
   error.
 

@@ -5,6 +5,7 @@
       "pending_samples": { "default": "mdi:tray-full" },
       "queued_outputs": { "default": "mdi:calendar-clock" },
       "failed_samples": { "default": "mdi:alert-circle-outline" },
+      "failed_outputs": { "default": "mdi:calendar-remove" },
       "history_samples": { "default": "mdi:database" },
       "history_oldest": { "default": "mdi:history" },
       "rate_limit_remaining": { "default": "mdi:speedometer" },

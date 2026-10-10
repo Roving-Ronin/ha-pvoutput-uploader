@@ -136,3 +136,36 @@ def test_adds_missing_columns(tmp_path: Path) -> None:
     assert row.values["b6"] is None
     assert row.uploaded == DONE
     store.close()
+
+
+def test_rejected_outputs_stay_until_queued_again(tmp_path: Path) -> None:
+    store = make_store(tmp_path)
+    store.queue_outputs(["20261001", "20261002"])
+    store.reject_output("20261001", "Bad request 400: something")
+    assert store.queued_outputs(10) == ["20261002"]
+    assert store.rejected_outputs() == [("20261001", "Bad request 400: something")]
+    summary = store.summary()
+    assert (summary["queued_outputs"], summary["failed_outputs"]) == (1, 1)
+
+    # Queuing it again (a reupload) retries it.
+    store.queue_outputs(["20261001"])
+    assert store.queued_outputs(10) == ["20261001", "20261002"]
+    assert store.rejected_outputs() == []
+    store.close()
+
+
+def test_unconfirmed_since_is_kept_until_the_slot_is_settled(tmp_path: Path) -> None:
+    store = make_store(tmp_path)
+    assert store.unconfirmed_since(600, 1000.0) == 1000.0
+    assert store.unconfirmed_since(600, 5000.0) == 1000.0  # the first attempt counts
+    store.close()
+
+    store = make_store(tmp_path)  # survives a restart
+    assert store.unconfirmed_since(600, 9000.0) == 1000.0
+    store.mark_range(301, 601, DONE)  # sent, given up on, or reuploaded
+    assert store.unconfirmed_since(600, 9000.0) == 9000.0
+
+    store.unconfirmed_since(900, 9000.0)
+    store.expire_before(1000)
+    assert store.unconfirmed_since(900, 9500.0) == 9500.0
+    store.close()

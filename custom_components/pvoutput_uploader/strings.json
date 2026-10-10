@@ -207,6 +207,7 @@
       "pending_samples": { "name": "Samples waiting" },
       "queued_outputs": { "name": "Daily outputs waiting" },
       "failed_samples": { "name": "Rejected samples" },
+      "failed_outputs": { "name": "Rejected daily outputs" },
       "history_samples": { "name": "History samples" },
       "history_oldest": { "name": "History start" },
       "rate_limit_remaining": { "name": "Requests left this hour" },
