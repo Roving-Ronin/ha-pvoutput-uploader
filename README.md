@@ -20,6 +20,23 @@ to [PVOutput](https://pvoutput.org), with local recording and automatic upload r
 If you already send to PVOutput with a `rest_command` automation, switch it off once the
 fields are added, so statuses are not sent twice.
 
+## Screenshots
+
+**Your PV sites** — add another site with **Add PV Site**, or configure an existing one.
+
+![PVOutput Uploader integration overview with two PV sites and the Add PV Site button](docs/images/pvoutput-sites.png)
+
+<details>
+<summary><strong>Field mappings, upload controls and diagnostics</strong> — click to expand</summary>
+
+Friendly source names and upload units are shown beside each field, including fixed
+battery capacity in Wh. Diagnostics show stored history, waiting and rejected samples,
+partly sent samples, and the remaining API allowance.
+
+![PVOutput site showing uploading controls, sensor field names and units, history and upload diagnostics](docs/images/pvoutput-fields.png)
+
+</details>
+
 The integration keeps its **own history log**: every 5 minutes it stores the values of
 every configured sensor, and it keeps them for **91 days** (configurable), however short
 Home Assistant's recorder history is. Whatever stops the uploads (PVOutput down, the
