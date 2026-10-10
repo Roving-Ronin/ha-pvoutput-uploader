@@ -259,14 +259,14 @@ async def test_field_sensors(recorder_mock, hass: HomeAssistant, entry: MockConf
     assert v5.attributes["source"] == "sensor"
     assert v5.attributes["source_name"] == "Outside"
     assert v5.attributes["value_per_interval"] == "average"
-    assert v5.attributes["sent"] is True
+    assert v5.attributes["configured_to_send"] is True
 
     b3 = hass.states.get("sensor.my_system_b3_battery_size")
     assert b3.state == "5544"
     assert b3.attributes["source"] == "fixed value"
     # A battery field on a standard account is kept but not sent.
-    assert b3.attributes["sent"] is False
-    assert b3.attributes["not_sent_because"] == "needs a PVOutput donor account"
+    assert b3.attributes["configured_to_send"] is False
+    assert b3.attributes["not_configured_to_send_because"] == "needs a PVOutput donor account"
 
     # Removing a field removes its sensor.
     with patch(GET_SYSTEM, AsyncMock(return_value=SystemInfo("My System", 5, False))):

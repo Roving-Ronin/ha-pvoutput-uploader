@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.0.1b5
+
+- Field sensor attribute `sent` renamed to `configured_to_send` (and `not_sent_because` to `not_configured_to_send_because`): it means the field is active and allowed by the account type, not that uploading is on or that PVOutput accepted it.
+
 ## 0.0.1b4
 
 - One sensor per configured field on the PVOutput system's device: named after the PVOutput field and its label, showing the Home Assistant sensor it reads (or the fixed value), whether it is sent, how values are combined and the last recorded value. The status sensors moved to Diagnostic, so the device's Sensors card lists exactly what is uploaded.

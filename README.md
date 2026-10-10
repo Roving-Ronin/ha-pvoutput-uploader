@@ -210,10 +210,12 @@ The PVOutput system's device page shows what is uploaded and as what:
 
 - **One sensor per configured field**, named after the PVOutput field and your label (e.g.
   *v5 Ambient*). Its state is the Home Assistant sensor the field reads, or the fixed
-  value. Attributes: the PVOutput field and its standard name, active or passive, whether
-  it is actually sent (donor-only fields on a standard account are not), how the 5 minute
-  values are combined, and the last recorded value with its time. The icon shows whether
-  the field is sent.
+  value. Attributes: the PVOutput field and its standard name, active or passive,
+  `configured_to_send` (active and allowed by the account type; donor-only fields on a
+  standard account are not), how the 5 minute values are combined, and the last recorded
+  value with its time. The icon follows `configured_to_send`. It does not show whether
+  uploading is switched on or what PVOutput accepted: see the **Uploading** switch and the
+  diagnostic sensors for that.
 - **Uploading** switch: stops sending while recording carries on.
 - Diagnostic sensors: last upload, samples waiting, daily outputs waiting, rejected
   samples, rejected daily outputs, history size and start, requests left this hour, rate

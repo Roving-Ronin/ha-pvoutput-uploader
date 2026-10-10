@@ -195,13 +195,17 @@ class FieldSensor(PVOutputEntity, SensorEntity):
         return True
 
     @property
-    def _sent(self) -> bool:
+    def _configured_to_send(self) -> bool:
+        """Active and allowed by the account type.
+
+        Not whether uploading is switched on, nor whether PVOutput accepted it.
+        """
         return self.mapping in self.coordinator.uploader.active_mappings
 
     @property
     def icon(self) -> str:
-        """Show whether the field is sent."""
-        return "mdi:upload" if self._sent else "mdi:upload-off"
+        """Show whether the field is configured to be sent."""
+        return "mdi:upload" if self._configured_to_send else "mdi:upload-off"
 
     @property
     def native_value(self) -> str:
@@ -221,10 +225,10 @@ class FieldSensor(PVOutputEntity, SensorEntity):
             "pvoutput_field_name": field.name,
             "source": "sensor" if m.entity_id else "fixed value",
             "active": m.active,
-            "sent": self._sent,
+            "configured_to_send": self._configured_to_send,
         }
-        if m.active and not self._sent:
-            attrs["not_sent_because"] = "needs a PVOutput donor account"
+        if m.active and not self._configured_to_send:
+            attrs["not_configured_to_send_because"] = "needs a PVOutput donor account"
         if m.entity_id:
             if (state := self.hass.states.get(m.entity_id)) is not None:
                 attrs["source_name"] = state.name
