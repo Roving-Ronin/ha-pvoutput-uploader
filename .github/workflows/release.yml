@@ -1,0 +1,97 @@
+name: Release
+
+# Releasing is a push: bump "version" in custom_components/pvoutput_uploader/manifest.json
+# and add a "## <version>" section to CHANGELOG.md, then push to main. This workflow
+# compiles the code and runs hassfest and, if they pass, creates tag v<version> and a
+# GitHub release with that changelog section as notes. It runs on every push to main, so
+# a failed release is retried by the push that fixes it; once a version is released,
+# later pushes only refresh its notes, and the tag is never moved.
+#
+# Betas: a version with a pre-release suffix (0.0.1b1, 0.1.0rc1) is published as a GitHub
+# pre-release, which HACS offers only to users who enable "Show beta versions".
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  compile:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Byte-compile
+        run: python -m compileall -q custom_components
+
+  hassfest:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: home-assistant/actions/hassfest@master
+
+  release:
+    needs: [compile, hassfest]
+    if: github.event_name != 'pull_request' && github.ref_name == 'main'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Read version and release notes
+        id: version
+        shell: bash
+        run: |
+          VERSION="$(jq -r .version custom_components/pvoutput_uploader/manifest.json)"
+          if ! [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+((a|b|rc)[0-9]+|[.-][0-9A-Za-z.]+)?$ ]]; then
+            echo "::error::manifest.json version '$VERSION' is not a release version"
+            exit 1
+          fi
+          # Anything after X.Y.Z (b1, rc2, -beta.1) makes it a pre-release.
+          if [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then PRERELEASE=false; else PRERELEASE=true; fi
+          # The CHANGELOG section for this version: from "## <version>" up to the next "## ".
+          awk -v v="$VERSION" '
+            /^## / { if (found) exit; if ($2 == v) { found = 1; next } }
+            found { print }
+            END { if (!found) exit 1 }
+          ' CHANGELOG.md > /tmp/release-notes.md || {
+            echo "::error::CHANGELOG.md has no '## $VERSION' section"
+            exit 1
+          }
+          TITLE="$(grep -m1 "^## $VERSION" CHANGELOG.md | sed -E 's/^## +//')"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "tag=v$VERSION" >> "$GITHUB_OUTPUT"
+          echo "title=v$TITLE" >> "$GITHUB_OUTPUT"
+          echo "prerelease=$PRERELEASE" >> "$GITHUB_OUTPUT"
+
+      - name: Create or update the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.version.outputs.tag }}
+          TITLE: ${{ steps.version.outputs.title }}
+          PRERELEASE: ${{ steps.version.outputs.prerelease }}
+        shell: bash
+        run: |
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "Release $TAG exists; refreshing its notes only."
+            gh release edit "$TAG" --title "$TITLE" --notes-file /tmp/release-notes.md \
+              --prerelease="$PRERELEASE"
+          elif git rev-parse -q --verify "refs/tags/$TAG" >/dev/null; then
+            echo "Tag $TAG exists without a release; creating the release on it."
+            gh release create "$TAG" --verify-tag --title "$TITLE" \
+              --notes-file /tmp/release-notes.md --prerelease="$PRERELEASE"
+          else
+            gh release create "$TAG" --target "$GITHUB_SHA" --title "$TITLE" \
+              --notes-file /tmp/release-notes.md --prerelease="$PRERELEASE"
+          fi

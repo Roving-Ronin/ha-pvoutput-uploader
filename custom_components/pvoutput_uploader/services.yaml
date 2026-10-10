@@ -1,0 +1,44 @@
+reupload:
+  fields:
+    config_entry_id:
+      selector:
+        config_entry:
+          integration: pvoutput_uploader
+    start:
+      required: true
+      selector:
+        date:
+    end:
+      selector:
+        date:
+    method:
+      default: auto
+      selector:
+        select:
+          translation_key: reupload_method
+          options:
+            - auto
+            - statuses
+            - outputs
+
+import_from_recorder:
+  fields:
+    config_entry_id:
+      selector:
+        config_entry:
+          integration: pvoutput_uploader
+    start:
+      required: true
+      selector:
+        datetime:
+    end:
+      selector:
+        datetime:
+    overwrite:
+      default: false
+      selector:
+        boolean:
+    upload:
+      default: false
+      selector:
+        boolean:

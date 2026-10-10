@@ -1,0 +1,173 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "PVOutput system",
+        "description": "Enter the API key and system ID from pvoutput.org (Settings). The status interval and donor status are read from your account.",
+        "data": {
+          "api_key": "API key",
+          "system_id": "System ID"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Could not reach PVOutput.",
+      "invalid_auth": "PVOutput refused the API key or system ID."
+    },
+    "abort": {
+      "already_configured": "This PVOutput system is already set up."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "PVOutput fields",
+        "description": "Account: **{account}**. PVOutput status interval: {detected_interval} min.\n\n{fields}\n\nChanges are kept only after **Save and close**.",
+        "menu_options": {
+          "add_field": "Add field",
+          "edit_field": "Edit field",
+          "remove_field": "Remove fields",
+          "settings": "Settings",
+          "save": "Save and close"
+        }
+      },
+      "add_field": {
+        "title": "Add field",
+        "description": "Pick a sensor, or enter a constant value instead (for example battery size), and the PVOutput field it feeds. Only fields not yet used and available to your account type are listed.",
+        "data": {
+          "entity_id": "Sensor",
+          "constant": "Constant value",
+          "field": "PVOutput field"
+        }
+      },
+      "field_details": {
+        "title": "{field}",
+        "description": "Name the field as it is labelled in PVOutput. Passive fields are recorded in the history log but not sent; switch them to active later and use the reupload action to send their history.",
+        "data": {
+          "name": "Name in PVOutput",
+          "active": "Active (send to PVOutput)",
+          "aggregate": "Value per interval"
+        }
+      },
+      "edit_field": {
+        "title": "Edit field",
+        "data": {
+          "field": "Field"
+        }
+      },
+      "edit_details": {
+        "title": "{field}",
+        "description": "Use either a sensor or a constant value.",
+        "data": {
+          "entity_id": "Sensor",
+          "constant": "Constant value",
+          "name": "Name in PVOutput",
+          "active": "Active (send to PVOutput)",
+          "aggregate": "Value per interval"
+        }
+      },
+      "remove_field": {
+        "title": "Remove fields",
+        "description": "Recorded history of removed fields stays in the log.",
+        "data": {
+          "fields": "Fields to remove"
+        }
+      },
+      "settings": {
+        "title": "Settings",
+        "data": {
+          "donor_mode": "Account type",
+          "upload_interval": "Upload interval",
+          "retention_days": "Keep history for",
+          "output_fallback": "Send daily outputs for statuses too old to upload"
+        },
+        "data_description": {
+          "donor_mode": "Donor accounts can send extended (v7-v12) and battery fields, upload 90 days back and 100 statuses per request.",
+          "upload_interval": "Should match the status interval of the system in PVOutput. The history log always records 5 minute values.",
+          "output_fallback": "When statuses could not be sent in time (for example after a long outage), send that day's totals as a daily output instead."
+        }
+      }
+    },
+    "error": {
+      "entity_or_constant": "Choose a sensor or enter a constant value, not both.",
+      "unit_mismatch": "The sensor's unit does not fit this field."
+    },
+    "abort": {
+      "no_free_fields": "All fields available to your account are already used."
+    }
+  },
+  "selector": {
+    "aggregate": {
+      "options": {
+        "average": "Average over the interval",
+        "last": "Last value",
+        "energy_today": "Energy since midnight (from an energy sensor)"
+      }
+    },
+    "donor_mode": {
+      "options": {
+        "auto": "Detect from PVOutput",
+        "donor": "Donor",
+        "standard": "Standard"
+      }
+    },
+    "reupload_method": {
+      "options": {
+        "auto": "Statuses where allowed, daily outputs for older days",
+        "statuses": "Statuses only",
+        "outputs": "Daily outputs only"
+      }
+    }
+  },
+  "entity": {
+    "sensor": {
+      "last_upload": { "name": "Last upload" },
+      "pending_samples": { "name": "Samples waiting" },
+      "queued_outputs": { "name": "Daily outputs waiting" },
+      "failed_samples": { "name": "Rejected samples" },
+      "history_samples": { "name": "History samples" },
+      "history_oldest": { "name": "History start" },
+      "rate_limit_remaining": { "name": "Requests left this hour" },
+      "paused_until": { "name": "Rate limit pause until" },
+      "account_type": {
+        "name": "Account type",
+        "state": { "donor": "Donor", "standard": "Standard" }
+      },
+      "last_error": { "name": "Last error" }
+    },
+    "switch": {
+      "uploading": { "name": "Uploading" }
+    }
+  },
+  "exceptions": {
+    "select_entry": {
+      "message": "Choose which PVOutput system to use."
+    },
+    "end_before_start": {
+      "message": "The end must be after the start."
+    }
+  },
+  "services": {
+    "reupload": {
+      "name": "Reupload history",
+      "description": "Sends recorded history again. Days inside PVOutput's status window (14 days, 90 for donors) are sent as statuses, older days as daily outputs.",
+      "fields": {
+        "config_entry_id": { "name": "PVOutput system", "description": "Needed only when more than one system is set up." },
+        "start": { "name": "Start date", "description": "First day to send." },
+        "end": { "name": "End date", "description": "Last day to send. Defaults to today." },
+        "method": { "name": "Method", "description": "How the days are sent." }
+      }
+    },
+    "import_from_recorder": {
+      "name": "Import from recorder",
+      "description": "Fills the history log from Home Assistant's recorded states, and from hourly long term statistics where states have been purged.",
+      "fields": {
+        "config_entry_id": { "name": "PVOutput system", "description": "Needed only when more than one system is set up." },
+        "start": { "name": "Start", "description": "Start of the period to import." },
+        "end": { "name": "End", "description": "End of the period. Defaults to now." },
+        "overwrite": { "name": "Overwrite", "description": "Replace samples already in the log with values from recorded states." },
+        "upload": { "name": "Upload", "description": "Send the imported samples to PVOutput. Off keeps them in the log only." }
+      }
+    }
+  }
+}
