@@ -68,10 +68,18 @@ NORMALISED_UNIT = "kW/kW"
 DAILY_HOUR = 2
 # After a stop, missed days are caught up this far back at most.
 CATCH_UP_DAYS = 30
+# Days before yesterday fetched again each day, for statuses that came late.
+REFRESH_DAYS = 2
+# A long history download rebuilds the statistics every this many days with
+# detail (and when it ends), not after every batch.
+IMPORT_EVERY_DAYS = 30
 
 META_BACKFILL = "archive_backfill"
 META_BACKFILL_RESULT = "archive_backfill_result"
 META_DAILY_LAST = "archive_daily_last"
+META_DAILY_REFRESHED = "archive_daily_refreshed"
+# Changed archive hours not imported into statistics yet (earliest hour).
+META_IMPORT_FROM = "archive_import_from"
 
 UNIT_CLASSES = {
     KIND_ENERGY: EnergyConverter.UNIT_CLASS,
@@ -117,7 +125,13 @@ def rollup(
     A status covers the interval ending at its time, so 10:00 counts towards
     09:00-10:00. Energy (counted since midnight) becomes the change over each
     hour; other values the mean, min and max of the hour's statuses.
+
+    Where hours have no statuses (a gap, or from midnight to the first
+    status), the energy counted over them is only known in total: it is
+    shared evenly by the hours it covers (the gap and the next hour with a
+    status), as Import history does. The day's total stays exact.
     """
+    day_start = day_window(day)[0]
     buckets: dict[str, dict[int, list[float]]] = {}
     for status in statuses:
         ts = _status_ts(day, status.time)
@@ -129,11 +143,13 @@ def rollup(
     rows = []
     for field, hours in buckets.items():
         if field in energy_fields:
-            previous = 0.0
+            previous, previous_hour = 0.0, day_start - 3600
             for hour in sorted(hours):
                 last = hours[hour][-1]
-                rows.append((hour, field, None, None, None, max(last - previous, 0.0)))
-                previous = last
+                covered = range(previous_hour + 3600, hour + 3600, 3600)
+                share = max(last - previous, 0.0) / len(covered)
+                rows.extend((h, field, None, None, None, share) for h in covered)
+                previous, previous_hour = last, hour
         else:
             for hour, values in sorted(hours.items()):
                 rows.append(
@@ -155,7 +171,9 @@ class Archive:
         self.backfill: dict[str, Any] | None = None
         self.result: dict[str, Any] | None = None
         self.summary: dict[str, Any] = {}
-        self._changed_from: int | None = None
+        # Earliest archive hour changed since the statistics were last built.
+        self._import_from: int | None = None
+        self._fetched_since_import = 0
         # Copy into download sensors once the entities exist, and after imports.
         self._copy_due = True
 
@@ -180,6 +198,8 @@ class Archive:
             self.backfill = json.loads(raw)
         if raw := await self.up._run(store.get_meta, META_BACKFILL_RESULT):
             self.result = json.loads(raw)
+        if raw := await self.up._run(store.get_meta, META_IMPORT_FROM):
+            self._import_from = int(raw)
         self.summary = await self.up._run(store.archive_summary)
 
     def _energy_fields(self) -> set[str]:
@@ -226,9 +246,10 @@ class Archive:
             start, end = day_window(day)
             rows = rollup(day, statuses, self._energy_fields())
             await up._run(up.store.archive_replace, start, end, rows)
-            self._changed_from = start if self._changed_from is None else min(
-                self._changed_from, start
+            self._import_from = start if self._import_from is None else min(
+                self._import_from, start
             )
+            self._fetched_since_import += 1
         await up._run(up.store.archive_mark_day, day.isoformat(), bool(statuses))
         return bool(statuses)
 
@@ -276,15 +297,28 @@ class Archive:
 
     async def async_cycle(self) -> None:
         """Run the history download and the daily download, then import."""
-        self._changed_from = None
+        before = self._import_from
         try:
             await self._async_backfill()
             if self.enabled:
                 await self._async_daily()
         finally:
-            if self._changed_from is not None:
-                await self._async_import(self._changed_from)
+            # A long history download rebuilds the statistics now and then and
+            # at its end, not after every batch: each rebuild runs from the
+            # earliest changed hour to the newest, to keep energy totals whole.
+            if self._import_from is not None and (
+                self.backfill is None or self._fetched_since_import >= IMPORT_EVERY_DAYS
+            ):
+                await self._async_import(self._import_from)
+                self._import_from = None
+                self._fetched_since_import = 0
                 self._copy_due = True
+            if self._import_from != before:
+                await self.up._run(
+                    self.up.store.set_meta,
+                    META_IMPORT_FROM,
+                    None if self._import_from is None else str(self._import_from),
+                )
             if self._copy_due:
                 self._copy_due = False
                 await self._async_copy_to_sensors()
@@ -319,23 +353,34 @@ class Archive:
         await self._save_backfill()
 
     async def _async_daily(self) -> None:
+        """Fetch the new days, and once a day the days before yesterday again.
+
+        Statuses can reach PVOutput late (another uploader catching up), so
+        each new day also fetches the REFRESH_DAYS before it once more.
+        """
+        store = self.up.store
         now = dt_util.now()
         latest = now.date() - timedelta(days=1 if now.hour >= DAILY_HOUR else 2)
-        stored = await self.up._run(self.up.store.get_meta, META_DAILY_LAST)
-        if stored is None:
-            day = latest
+        stored = await self.up._run(store.get_meta, META_DAILY_LAST)
+        last = date.fromisoformat(stored) if stored else None
+        if last is None:
+            days = {latest}
         else:
-            day = max(
-                date.fromisoformat(stored) + timedelta(days=1),
-                latest - timedelta(days=CATCH_UP_DAYS - 1),
-            )
-        for _ in range(MAX_REQUESTS_PER_CYCLE):
-            if day > latest:
-                break
-            if await self._fetch_day(day) is None:
-                break
-            await self.up._run(self.up.store.set_meta, META_DAILY_LAST, day.isoformat())
-            day += timedelta(days=1)
+            first = max(last + timedelta(days=1), latest - timedelta(days=CATCH_UP_DAYS - 1))
+            days = {first + timedelta(days=n) for n in range((latest - first).days + 1)}
+            if await self.up._run(store.get_meta, META_DAILY_REFRESHED) != latest.isoformat():
+                days |= {latest - timedelta(days=n) for n in range(1, REFRESH_DAYS + 1)}
+        if not days:
+            return
+        fetched = 0
+        for day in sorted(days):
+            if fetched == MAX_REQUESTS_PER_CYCLE or await self._fetch_day(day) is None:
+                return
+            fetched += 1
+            if last is None or day > last:
+                last = day
+                await self.up._run(store.set_meta, META_DAILY_LAST, day.isoformat())
+        await self.up._run(store.set_meta, META_DAILY_REFRESHED, latest.isoformat())
 
     # Statistics
 

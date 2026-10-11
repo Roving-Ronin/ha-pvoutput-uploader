@@ -332,17 +332,24 @@ normalised output, named e.g. *My System v2 Power Generation (PVOutput history)*
 (statistic `pvoutput_uploader:<system id>_v2`).
 
 - **Hourly:** Home Assistant takes past data only as hourly statistics. Energy (v1, v3,
-  and v7-v12 set up as energy since midnight) becomes each hour's exact total, from
-  PVOutput's running total; everything else the hour's mean, min and max over its 5 or
-  10 minute statuses, so short peaks still show as the hour's max. Recent detail is in
-  the download sensors' own history.
+  and v7-v12 set up as energy since midnight) becomes each hour's total, from PVOutput's
+  running total; everything else the hour's mean, min and max over its 5 or 10 minute
+  statuses, so short peaks still show as the hour's max. Recent detail is in the
+  download sensors' own history.
+- **Hours without statuses:** where PVOutput has no statuses for some hours (a gap, or
+  nothing from midnight until the first status), the energy counted over them is only
+  known in total, so it is shared evenly by those hours and the next hour with a
+  status, as **Import history** does. The day's total stays exact; how it is spread
+  over such hours is an estimate. Hours with statuses are exact.
 - **Where it shows:** statistics graph cards and the Energy dashboard (they can pick
   statistics that have no entity), and **Developer tools → Statistics**. There is no
   entity and no current state: for a live value set the field to Download.
 - **Daily, by itself:** the **Daily history download** switch (on by default, under
-  Controls) fetches yesterday every day after 02:00, one request, and catches up on up to
-  30 missed days after a stop. So the history keeps growing even if nobody ever opens the
-  menu.
+  Controls) fetches yesterday every day after 02:00, and catches up on up to 30 missed
+  days after a stop. So the history keeps growing even if nobody ever opens the menu.
+  Statuses can reach PVOutput late (another uploader catching up after an outage, or
+  a reupload), so each day the two days before yesterday are fetched again too: three
+  requests a day. Anything later than that needs a **Download history** of those days.
 - **Further back:** **Configure → Download history from PVOutput** with From and To (up
   to yesterday). It first checks how far back PVOutput has statuses: if the start has
   none, you are told the first day it has, and only that part is downloaded. The days
@@ -471,7 +478,8 @@ with 4,657 still waiting to upload. The diagnostics show progress as the backlog
 - **PVOutput history** is read with `getstatus.jsp?h=1` (a whole day per request, up to
   288 statuses), rolled up to hours in the history log (`archive` table) and imported
   as external statistics; changed days rebuild the statistics from the first changed
-  hour on, so energy totals stay continuous.
+  hour on, so energy totals stay continuous. A long history download rebuilds them
+  every 30 days with detail and at its end, rather than after every batch of days.
 
 ## Entities
 

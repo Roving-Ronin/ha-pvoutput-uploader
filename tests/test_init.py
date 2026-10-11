@@ -626,7 +626,10 @@ async def test_pvoutput_history(
 
         # Yesterday is downloaded, every column as statistics.
         assert [r["mean"] for r in await hourly(statistic_id("1234", "v2"))] == [500.0, 700.0]
-        assert [r["sum"] for r in await hourly(statistic_id("1234", "v1"))] == [300.0, 400.0]
+        # No statuses before 10:00: the 300 Wh is shared by the hours from midnight.
+        v1 = await hourly(statistic_id("1234", "v1"))
+        assert [round(r["sum"], 1) for r in v1[-2:]] == [300.0, 400.0]
+        assert round(v1[0]["sum"], 1) == 30.0
         # The download sensor gets it for the time before it existed.
         sensor = "sensor.my_system_v2_power_from_pvoutput"
         assert [r["mean"] for r in await hourly(sensor)] == [500.0, 700.0]

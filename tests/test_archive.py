@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, timedelta
 from pathlib import Path
 import time
 from typing import Any
@@ -53,8 +53,10 @@ DAY = day_of(
 async def test_rollup(hass: HomeAssistant) -> None:
     rows = {(r[0], r[1]): r[2:] for r in rollup(date(2026, 10, 10), DAY, {"v1", "v3"})}
     nine, ten = local_ts(10, 10, 9, 0), local_ts(10, 10, 10, 0)
-    # Energy since midnight becomes the change over each hour.
-    assert rows[(nine, "v1")] == (None, None, None, 150.0)
+    # Energy since midnight becomes the change over each hour; with no statuses
+    # from midnight to 09:50, the 150 Wh is shared by the ten hours 00:00-10:00.
+    for hour in range(10):
+        assert rows[(local_ts(10, 10, hour, 0), "v1")] == (None, None, None, 15.0)
     assert rows[(ten, "v1")] == (None, None, None, 50.0)
     # Other values: mean, min and max of the hour's statuses.
     assert rows[(nine, "v2")] == (600.0, 500.0, 700.0, None)
@@ -63,7 +65,29 @@ async def test_rollup(hass: HomeAssistant) -> None:
     assert rows[(nine, "normalised")] == (0.1, 0.1, 0.1, None)
     # The 00:00 status is left out.
     assert (local_ts(10, 9, 23, 0), "v2") not in rows
-    assert len(rows) == 6
+    assert len(rows) == 15
+
+
+async def test_rollup_shares_energy_over_gaps(hass: HomeAssistant) -> None:
+    statuses = day_of(
+        [
+            ("00:10", {"v3": 50.0}),
+            ("09:00", {"v3": 1000.0}),
+            # No status 09:00-11:00: the 800 Wh is shared by the two hours.
+            ("11:00", {"v3": 1800.0}),
+            ("11:10", {"v3": 1900.0}),
+        ]
+    )
+    rows = {r[0]: r[5] for r in rollup(date(2026, 10, 10), statuses, {"v1", "v3"})}
+    assert rows[local_ts(10, 10, 0, 0)] == 50.0
+    # 01:00-09:00 (eight hours, the 09:00 status closing 08:00-09:00) share 950 Wh.
+    assert rows[local_ts(10, 10, 1, 0)] == pytest.approx(950 / 8)
+    assert rows[local_ts(10, 10, 8, 0)] == pytest.approx(950 / 8)
+    assert rows[local_ts(10, 10, 9, 0)] == 400.0
+    assert rows[local_ts(10, 10, 10, 0)] == 400.0
+    assert rows[local_ts(10, 10, 11, 0)] == 100.0
+    # The day's total is exact.
+    assert sum(rows.values()) == pytest.approx(1900.0)
 
 
 async def hourly(hass: HomeAssistant, stat: str, start: int) -> list[dict[str, Any]]:
@@ -98,7 +122,7 @@ async def test_daily_download(
     # Every column is kept as statistics, whatever the fields are set to.
     start = day_window(date(2026, 10, 9))[0]
     v1 = await hourly(hass, statistic_id("1", "v1"), start)
-    assert [round(r["sum"], 1) for r in v1] == [150.0, 200.0]
+    assert [round(r["sum"], 1) for r in v1] == [15.0 * n for n in range(1, 11)] + [200.0]
     v2 = await hourly(hass, statistic_id("1", "v2"), start)
     assert [(r["mean"], r["min"], r["max"]) for r in v2] == [
         (600.0, 500.0, 700.0),
@@ -106,10 +130,13 @@ async def test_daily_download(
     ]
     assert await hourly(hass, statistic_id("1", "v5"), start)
 
-    # The next day after 02:00: the day after.
+    # The next day: the new day, and the two before it once more (late statuses).
     now.tick(24 * 3600)
     await up.archive.async_cycle()
-    assert up.client.history_calls == ["20261009", "20261010"]
+    assert up.client.history_calls == ["20261009", "20261008", "20261009", "20261010"]
+    # Only once that day.
+    await up.archive.async_cycle()
+    assert len(up.client.history_calls) == 4
 
 
 async def test_daily_download_switched_off(
@@ -142,7 +169,9 @@ async def test_history_download(
     # Energy sums run on across the days.
     start = day_window(date(2026, 10, 2))[0]
     v1 = await hourly(hass, statistic_id("1", "v1"), start)
-    assert [round(r["sum"], 1) for r in v1] == [150.0, 200.0, 350.0, 400.0]
+    assert len(v1) == 22
+    assert round(v1[10]["sum"], 1) == 200.0
+    assert round(v1[-1]["sum"], 1) == 400.0
 
 
 async def test_history_download_resumes_after_the_limit(
@@ -211,3 +240,50 @@ async def test_detail_replaces_and_empty_days_keep(
     await up.archive.async_queue(date(2026, 10, 2), date(2026, 10, 2))
     await up.archive.async_cycle()
     assert await up._run(up.store.archive_rows, "v2") == rows
+
+
+async def test_late_statuses_are_picked_up(
+    recorder_mock, hass: HomeAssistant, tmp_path: Path, now: FrozenDateTimeFactory
+) -> None:
+    up = await make(hass, tmp_path, [field("v2")])
+    up.client.history["20261009"] = day_of([("10:00", {"v2": 100.0})])
+    await up.archive.async_cycle()
+
+    # Another uploader sends the rest of 9 October later that day.
+    up.client.history["20261009"] = day_of(
+        [("10:00", {"v2": 100.0}), ("15:00", {"v2": 300.0})]
+    )
+    now.tick(24 * 3600)
+    await up.archive.async_cycle()
+    rows = await up._run(up.store.archive_rows, "v2")
+    assert [r[1] for r in rows] == [100.0, 300.0]
+
+
+async def test_long_history_download_rebuilds_now_and_then(
+    recorder_mock, hass: HomeAssistant, tmp_path: Path, now: FrozenDateTimeFactory
+) -> None:
+    from unittest.mock import patch
+
+    from custom_components.pvoutput_uploader import archive as archive_module
+
+    up = await make(hass, tmp_path, [field("v2")])
+    up.archive.enabled = False
+    first = date(2026, 8, 1)
+    for n in range(40):
+        up.client.history[(first + timedelta(days=n)).strftime("%Y%m%d")] = list(DAY)
+    await up.archive.async_queue(first, first + timedelta(days=39))
+
+    imports = []
+    with patch.object(
+        archive_module,
+        "async_add_external_statistics",
+        side_effect=lambda hass, meta, stats: imports.append(meta["statistic_id"]),
+    ):
+        # Ten days per cycle: no rebuild after 10 and 20 days, one at 30 and at the end.
+        rebuilt = []
+        for _ in range(4):
+            await up.archive.async_cycle()
+            rebuilt.append(bool(imports))
+            imports.clear()
+    assert rebuilt == [False, False, True, True]
+    assert up.archive.backfill is None
