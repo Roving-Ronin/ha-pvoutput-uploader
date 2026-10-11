@@ -187,6 +187,7 @@
       "unit_required": "This sensor has no unit. Enter its source unit before saving."
     },
     "abort": {
+      "no_free_fields": "Every PVOutput field this PV site can send is already configured. Edit or remove a field to change what is sent; extended and battery fields need a donor account.",
       "field_unavailable": "{field} was added to this PV site in the meantime, so it was not added again. Open Configure to edit it.",
       "not_loaded": "The integration is not running. Check that it has started, then try again.",
       "reupload_queued": "Queued: {status_days} days as statuses, {output_days} days as daily totals. Progress shows in the Samples waiting and Daily outputs waiting sensors.",

@@ -288,8 +288,12 @@ class PVOutputUploaderOptionsFlow(OptionsFlow):
         """Show the main menu."""
         self._options = deepcopy(DEFAULT_OPTIONS) | deepcopy(dict(self.config_entry.options))
         menu = []
+        fields = self._describe()
         if self._free_fields():
             menu.append("add_field")
+        else:
+            # Nothing left to add: no Add field, and say why.
+            fields += "\n\n" + self._all_in_use()
         if self._fields:
             menu += ["edit_field", "remove_field"]
         menu += ["reupload", "import_history", "settings"]
@@ -298,13 +302,26 @@ class PVOutputUploaderOptionsFlow(OptionsFlow):
             step_id="init",
             menu_options=menu,
             description_placeholders={
-                "fields": self._describe(),
+                "fields": fields,
                 "account": "donor" if self._donor() else "standard",
                 "detected_interval": str(detected),
             },
         )
 
     # Add
+
+    def _all_in_use(self) -> str:
+        """Explain why Add field is not offered."""
+        if self._donor():
+            return (
+                "_Every PVOutput field is configured, so **Add field** is not shown. "
+                "Edit or remove a field to change what is sent._"
+            )
+        return (
+            "_Every field a standard account can send (v1-v6) is configured, so "
+            "**Add field** is not shown. Extended (v7-v12) and battery (b1-b6) fields "
+            "need a PVOutput donor account._"
+        )
 
     def _field_available(self, field: str) -> bool:
         """Check a field against the options as saved now, not as first shown.
@@ -314,6 +331,11 @@ class PVOutputUploaderOptionsFlow(OptionsFlow):
         """
         self._options = deepcopy(DEFAULT_OPTIONS) | deepcopy(dict(self.config_entry.options))
         return field in self._free_fields()
+
+    def _field_available_any(self) -> bool:
+        """Return whether any field can still be added, as saved now."""
+        self._options = deepcopy(DEFAULT_OPTIONS) | deepcopy(dict(self.config_entry.options))
+        return bool(self._free_fields())
 
     def _add_field(self, new: dict[str, Any]) -> ConfigFlowResult:
         """Save a new field, unless it was taken meanwhile."""
@@ -330,6 +352,8 @@ class PVOutputUploaderOptionsFlow(OptionsFlow):
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
         """Choose where the value comes from."""
+        if not self._field_available_any():
+            return self.async_abort(reason="no_free_fields")
         return self.async_show_menu(
             step_id="add_field", menu_options=["add_sensor", "add_constant"]
         )
@@ -350,6 +374,8 @@ class PVOutputUploaderOptionsFlow(OptionsFlow):
             else:
                 self._new = {MAP_FIELD: field, MAP_ENTITY: entity_id, MAP_CONSTANT: None}
                 return await self.async_step_sensor_details()
+        if not self._field_available_any():
+            return self.async_abort(reason="no_free_fields")
         schema = vol.Schema(
             {
                 vol.Required(MAP_ENTITY): ENTITY_SELECTOR,
@@ -428,6 +454,8 @@ class PVOutputUploaderOptionsFlow(OptionsFlow):
                 errors[MAP_CONSTANT] = "constant_required"
             else:
                 return self._add_field(new)
+        if not self._field_available_any():
+            return self.async_abort(reason="no_free_fields")
         schema = vol.Schema(
             {
                 vol.Required(MAP_FIELD): self._field_selector(

@@ -135,8 +135,16 @@ Each action saves as soon as it is submitted.
     yet, and donor fields only for donor accounts). Then name it as in PVOutput, choose
     whether it is **active**, and, where a field allows it, how the 5 minute values of an
     interval are combined: average, last value, or energy since midnight.
-  - **A fixed value**: the same number in every status, e.g. the battery size for `b3`.
-    It is not logged and never sends a status on its own.
+  - **A fixed value**: the same number in every status, e.g. the battery size for `b3`
+    (for `b6`, the battery state, you pick the state from a list). It is not logged and
+    never sends a status on its own.
+
+  Each PVOutput field can be used once. The lists offer only fields still free, and the
+  choice is checked again when you submit, against the configuration as saved at that
+  moment, so a field added meanwhile in another Configure window is refused (and
+  nothing that window saved is lost). When every field the account can send is
+  configured, **Add field** is not shown and the menu says why: on a standard account
+  that is v1-v6, as extended and battery fields need a donor account.
 - **Edit field** / **Remove fields**.
 - **Reupload history**: send the log again, since the first unsent status or from a
   date and time.

@@ -3,6 +3,8 @@
 ## 0.1.4
 
 - Adding a field checks again on submit, against the configuration as saved at that moment, that the PVOutput field is still free. A field added meanwhile in another Configure window (or from a stale form) is no longer added twice, and saving a new field no longer drops one another window saved. The field lists already showed only free fields.
+- When every field the account can send is configured, **Add field** is not shown, and the menu says why (on a standard account: all of v1-v6, as extended and battery fields need a donor account). If the last free field is taken in another window after the menu opened, adding stops with that message instead of showing an empty list.
+- README: each field can be used once; how the free-field lists and the checks work.
 
 ## 0.1.3
 

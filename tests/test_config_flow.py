@@ -471,3 +471,44 @@ async def test_adding_keeps_fields_added_elsewhere(
     result = await _configure(hass, result, {"name": "Outside", "active": True, "aggregate": "average"})
     assert result["type"] is FlowResultType.CREATE_ENTRY
     assert [m["field"] for m in entry.options[CONF_FIELDS]] == ["v2", "v5"]
+
+
+STANDARD_FIELDS = ["v1", "v2", "v3", "v4", "v5", "v6"]
+
+
+async def test_no_add_field_when_all_in_use(recorder_mock, hass: HomeAssistant) -> None:
+    entry = options_entry(
+        hass, fields=[_mapping(f, f"sensor.{f}") for f in STANDARD_FIELDS]
+    )
+    result = await _menu(hass, entry)
+    assert "add_field" not in result["menu_options"]
+    assert result["menu_options"][:2] == ["edit_field", "remove_field"]
+    assert "Every field a standard account can send" in result["description_placeholders"]["fields"]
+
+
+async def test_last_field_taken_after_the_menu(recorder_mock, hass: HomeAssistant) -> None:
+    entry = options_entry(hass)
+    five = dict(entry.options) | {
+        CONF_FIELDS: [_mapping(f, f"sensor.{f}") for f in STANDARD_FIELDS[:-1]]
+    }
+    six = dict(entry.options) | {
+        CONF_FIELDS: [_mapping(f, f"sensor.{f}") for f in STANDARD_FIELDS]
+    }
+
+    # v6 is still free when the menu opens, then another window takes it.
+    hass.config_entries.async_update_entry(entry, options=five)
+    result = await _menu(hass, entry)
+    assert "add_field" in result["menu_options"]
+    hass.config_entries.async_update_entry(entry, options=six)
+    result = await _choose(hass, result, "add_field")
+    assert result["type"] is FlowResultType.ABORT
+    assert result["reason"] == "no_free_fields"
+
+    # The same after choosing a sensor or a fixed value.
+    for step in ("add_sensor", "add_constant"):
+        hass.config_entries.async_update_entry(entry, options=five)
+        result = await _choose(hass, await _menu(hass, entry), "add_field")
+        hass.config_entries.async_update_entry(entry, options=six)
+        result = await _choose(hass, result, step)
+        assert result["type"] is FlowResultType.ABORT
+        assert result["reason"] == "no_free_fields"
