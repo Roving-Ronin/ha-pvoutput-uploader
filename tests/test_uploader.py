@@ -963,3 +963,23 @@ async def test_clear_queue_keeps_current_statuses(
     await up.async_reupload(local_dt(10, 9, 12, 0), date(2026, 10, 10), "statuses")
     await up._async_upload_statuses()
     assert up.client.batches[-1] == ["20261009,12:00,,1", "20261009,12:05,,1"]
+
+
+async def test_reupload_up_to_a_time(
+    hass: HomeAssistant, tmp_path: Path, now: FrozenDateTimeFactory
+) -> None:
+    up = await make(hass, tmp_path, [field("v2")])
+    times = [local_ts(10, 9, 10, m) for m in (0, 5, 10, 15)]
+    await add(up, *(Sample(t, {"v2": 1.0}, DONE) for t in times))
+    result = await up.async_reupload(
+        local_dt(10, 9, 10, 5), local_dt(10, 9, 10, 10), "statuses"
+    )
+    assert result == {"status_days": 1, "output_days": 0}
+    st = await states(up, 0, 2**40)
+    # From 10:05 to 10:10, both included.
+    assert [st[t] for t in times] == [DONE, PENDING, PENDING, DONE]
+
+    # A time in the future stops at now.
+    await up.async_reupload(local_dt(10, 9, 10, 0), local_dt(10, 12, 0, 0), "statuses")
+    st = await states(up, 0, 2**40)
+    assert [st[t] for t in times] == [PENDING] * 4

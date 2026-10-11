@@ -17,7 +17,7 @@ reupload:
         datetime:
     end:
       selector:
-        date:
+        datetime:
     method:
       default: auto
       selector:

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
-from datetime import date, datetime, timedelta
+from datetime import datetime, timedelta
 from typing import Any
 
 import voluptuous as vol
@@ -20,7 +20,6 @@ from homeassistant.core import callback
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.selector import (
     BooleanSelector,
-    DateSelector,
     DateTimeSelector,
     EntitySelector,
     EntitySelectorConfig,
@@ -606,7 +605,11 @@ class PVOutputUploaderOptionsFlow(OptionsFlow):
         today = dt_util.now().date()
         first_unsent = await uploader.async_first_unsent()
         if user_input is not None:
-            end = date.fromisoformat(user_input.get(ATTR_END) or today.isoformat())
+            end = (
+                _local_datetime(user_input[ATTR_END])
+                if user_input.get(ATTR_END)
+                else dt_util.now()
+            )
             start: datetime | None = None
             if user_input[ATTR_FROM] == FROM_FAILURE:
                 if first_unsent is None:
@@ -617,7 +620,7 @@ class PVOutputUploaderOptionsFlow(OptionsFlow):
                 errors[ATTR_START] = "start_required"
             else:
                 start = _local_datetime(user_input[ATTR_START])
-            if start is not None and end < start.date():
+            if start is not None and end < start:
                 errors["base"] = "end_before_start"
             if start is not None and not errors:
                 result = await uploader.async_reupload(
@@ -644,7 +647,7 @@ class PVOutputUploaderOptionsFlow(OptionsFlow):
                     )
                 ),
                 vol.Optional(ATTR_START): DateTimeSelector(),
-                vol.Optional(ATTR_END): DateSelector(),
+                vol.Optional(ATTR_END): DateTimeSelector(),
                 vol.Required(ATTR_METHOD): SelectSelector(
                     SelectSelectorConfig(
                         options=[REUPLOAD_AUTO, REUPLOAD_STATUSES, REUPLOAD_OUTPUTS],
@@ -656,7 +659,7 @@ class PVOutputUploaderOptionsFlow(OptionsFlow):
         defaults = user_input or {
             ATTR_FROM: FROM_FAILURE if first_unsent is not None else FROM_TIME,
             ATTR_START: (today - timedelta(days=1)).strftime("%Y-%m-%d 00:00:00"),
-            ATTR_END: today.isoformat(),
+            ATTR_END: dt_util.now().strftime("%Y-%m-%d %H:%M:00"),
             ATTR_METHOD: REUPLOAD_AUTO,
         }
         summary = uploader.summary

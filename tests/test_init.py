@@ -199,7 +199,7 @@ async def test_history_from_the_menu(
 
     async def submit(data: dict) -> dict:
         return await hass.config_entries.options.async_configure(
-            result["flow_id"], {"method": "auto", "end": today.isoformat()} | data
+            result["flow_id"], {"method": "auto", "end": f"{today.isoformat()} 23:59:00"} | data
         )
 
     # Nothing recorded yet, so nothing unsent.
@@ -209,7 +209,7 @@ async def test_history_from_the_menu(
     assert result["errors"] == {"start": "start_required"}
     result = await submit(
         {"from": "from_time", "start": f"{today.isoformat()} 00:00:00",
-         "end": (today - timedelta(days=1)).isoformat()}
+         "end": f"{(today - timedelta(days=1)).isoformat()} 23:59:00"}
     )
     assert result["errors"] == {"base": "end_before_start"}
     result = await submit(

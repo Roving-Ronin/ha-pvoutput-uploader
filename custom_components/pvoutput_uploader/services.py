@@ -40,7 +40,7 @@ REUPLOAD_SCHEMA = vol.Schema(
         vol.Optional(ATTR_START): vol.Any(cv.date, cv.datetime),
         vol.Optional(ATTR_SINCE_FAILURE, default=False): cv.boolean,
         vol.Optional(ATTR_WITHOUT_BATTERY, default=False): cv.boolean,
-        vol.Optional(ATTR_END): cv.date,
+        vol.Optional(ATTR_END): vol.Any(cv.date, cv.datetime),
         vol.Optional(ATTR_METHOD, default=REUPLOAD_AUTO): vol.In(
             [REUPLOAD_AUTO, REUPLOAD_STATUSES, REUPLOAD_OUTPUTS]
         ),
@@ -91,7 +91,10 @@ def async_setup_services(hass: HomeAssistant) -> None:
         entry = _entry(hass, call)
         coordinator = entry.runtime_data
         uploader = coordinator.uploader
-        end: date = call.data.get(ATTR_END) or dt_util.now().date()
+        # A day (to its end) or a date and time.
+        end: date | datetime = call.data.get(ATTR_END) or dt_util.now().date()
+        if isinstance(end, datetime):
+            end = _as_local(end)
         if call.data[ATTR_SINCE_FAILURE]:
             if (first := await uploader.async_first_unsent()) is None:
                 return {"status_days": 0, "output_days": 0}
@@ -102,7 +105,7 @@ def async_setup_services(hass: HomeAssistant) -> None:
             raise ServiceValidationError(
                 translation_domain=DOMAIN, translation_key="start_required"
             )
-        if end < start.date():
+        if (end < start) if isinstance(end, datetime) else (end < start.date()):
             raise ServiceValidationError(
                 translation_domain=DOMAIN, translation_key="end_before_start"
             )

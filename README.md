@@ -228,7 +228,7 @@ statuses, and when the first unsent one is. Start:
   or became too old (`since_failure: true` in the action).
 - **From a date and time** you choose (`start:` a date or a date and time).
 
-…up to an end day (default today), sent as:
+…up to an end date and time (default now; the action also takes a day, meaning up to its end), sent as:
 
 - *Statuses where allowed, daily totals for older days* (default): days inside PVOutput's
   status window (14 days, 90 for donors) as statuses, older days as daily outputs
@@ -238,10 +238,10 @@ statuses, and when the first unsent one is. Start:
 
 Battery fields (`b1`–`b6`) go in the same batches as the other fields, up to 100
 statuses per request for donors, so three weeks of 5 minute statuses (6,048) take about
-61 requests. PVOutput's documentation lists battery fields only for single statuses;
-the batch service accepts them as six more columns after `v12` (a test batch was
-accepted). Check the battery chart in PVOutput after the first batches: if battery
-values are missing there, report it, as PVOutput would then be dropping them.
+61 requests, and a few days of history go out in a moment. PVOutput's documentation
+lists battery fields only for single statuses, but its batch service takes them as six
+more columns after `v12` and stores them (tested: the battery values appear in
+PVOutput).
 
 For scripts and automations, `without_battery: true` on the `pvoutput_uploader.reupload`
 action sends everything waiting up to that moment without battery values. It is no
@@ -299,7 +299,7 @@ with 4,657 still waiting to upload. The diagnostics show progress as the backlog
   **Donor** manually under Account type.
 - **Battery fields** go in the same batches as the other fields, as six columns after
   `v12` (b1-b6). PVOutput documents them only for single statuses; its batch service
-  accepts the extra columns, which is not documented.
+  takes and stores them all the same (tested).
 
 ## Entities
 

@@ -140,7 +140,7 @@
         },
         "data_description": {
           "start": "Used with \"From a date and time\".",
-          "end": "Last day to send. Defaults to today.",
+          "end": "Statuses up to this date and time are sent (that one included). Defaults to now.",
           "method": "Statuses keep every interval; daily totals replace the day's totals in PVOutput."
         }
       },
@@ -314,7 +314,7 @@
         },
         "end": {
           "name": "End date",
-          "description": "Last day to send. Defaults to today."
+          "description": "A date and time (statuses up to it), or a day (up to its end). Defaults to today."
         },
         "method": {
           "name": "Method",

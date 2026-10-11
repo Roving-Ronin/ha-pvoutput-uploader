@@ -833,13 +833,17 @@ class Uploader:
         return await self._run(self.store.first_unsent)
 
     async def async_reupload(
-        self, start: datetime, end: date, method: str, without_battery: bool = False
+        self,
+        start: datetime,
+        end: date | datetime,
+        method: str,
+        without_battery: bool = False,
     ) -> dict[str, int]:
-        """Queue history from ``start`` to the end of day ``end`` for sending again.
+        """Queue history from ``start`` to ``end`` for sending again.
 
-        With ``without_battery``, everything waiting up to now is sent in batches
-        without battery values (100 statuses per request instead of one); newer
-        statuses keep them. Reuploading the period normally adds them later.
+        ``end`` is a time (statuses up to it) or a day (to its end). With
+        ``without_battery``, everything waiting up to now is sent without
+        battery values; newer statuses keep them.
         """
         async with self.lock:
             await self._run(
@@ -849,7 +853,13 @@ class Uploader:
             )
             now = time.time()
             today = dt_util.now().date()
-            end = min(end, today)
+            if isinstance(end, datetime):
+                end_ts: int | None = min(int(end.timestamp()), int(now))
+                end_day = _local(end_ts).date()
+            else:
+                end_ts = None
+                end_day = min(end, today)
+            end = end_day
             window = self.window_start(now)
             window_day = _local(window).date()
             start_ts = int(start.timestamp())
@@ -859,7 +869,8 @@ class Uploader:
 
             if method in (REUPLOAD_AUTO, REUPLOAD_STATUSES):
                 lo = max(start_ts, self._day_bounds(window_day)[0])
-                _, hi = self._day_bounds(end)
+                # Up to the given time (that row included), or the end of the day.
+                hi = end_ts + 1 if end_ts is not None else self._day_bounds(end)[1]
                 if lo < hi:
                     await self._run(self.store.mark_range, lo, hi, PENDING)
                     status_days = (end - max(start_day, window_day)).days + 1

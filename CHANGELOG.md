@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.1.6b4
+
+- **Reupload history → To** takes a time as well as a day, like From: statuses up to that time are sent (default now). The `reupload` action's `end` takes a date and time, or a day as before (up to its end).
+- Battery values in batches are confirmed: PVOutput stores them (a few days of history with battery values went out in a moment). README updated.
+
 ## 0.1.6b3
 
 - **Battery fields go in batches.** Statuses with b1-b6 are sent in batches like the others (up to 100 per request for donors), as six columns after `v12`, instead of one request per status: a 3-week backlog takes about 61 requests instead of about 6,000. PVOutput documents battery fields only for single statuses; a test batch with them was accepted. If battery values are missing in PVOutput after an upload, please report it. The **Leave out battery fields** tick box is removed from Reupload history as it no longer saves time (`without_battery` on the action still works).
