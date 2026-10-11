@@ -13,6 +13,7 @@ to [PVOutput](https://pvoutput.org), with local recording and automatic upload r
    key and system ID from pvoutput.org (*Settings → API Settings*). The status interval
    and donor status are read from your account. Use **Add PV Site** to add another system.
 3. Open **Configure → Add field** and add the sensors or fixed values to send.
+   Available fields depend on donor status; see **How it works → Donor features** for details.
    For sensors without a unit, enter **Source / custom unit** when prompted.
 4. Optional: **Configure → Import history from Home Assistant** to fill the log for the
    days before installing, and send them.
