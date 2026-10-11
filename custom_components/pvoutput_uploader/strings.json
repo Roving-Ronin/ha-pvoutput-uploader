@@ -136,9 +136,11 @@
           "from": "Start",
           "start": "Date and time",
           "end": "To",
-          "method": "Send as"
+          "method": "Send as",
+          "passive_fields": "Also send passive fields"
         },
         "data_description": {
+          "passive_fields": "Passive fields are recorded but not sent. Ticked ones are sent too, for the statuses of this period only; live statuses keep them off. Donor and battery rules still apply (battery fields need b1).",
           "start": "Used with \"From a date and time\".",
           "end": "Statuses up to this date and time are sent (that one included). Defaults to now.",
           "method": "Statuses keep every interval; daily totals replace the day's totals in PVOutput."
@@ -299,6 +301,10 @@
         "config_entry_id": {
           "name": "PVOutput system",
           "description": "Needed only when more than one system is set up."
+        },
+        "passive_fields": {
+          "name": "Passive fields",
+          "description": "Passive fields (recorded, not sent) to send too, for the statuses of this period only, e.g. v7 or b2."
         },
         "without_battery": {
           "name": "Without battery",

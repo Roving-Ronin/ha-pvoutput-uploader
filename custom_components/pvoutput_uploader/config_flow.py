@@ -75,6 +75,7 @@ from .services import (
     ATTR_END,
     ATTR_METHOD,
     ATTR_OVERWRITE,
+    ATTR_PASSIVE_FIELDS,
     ATTR_START,
     ATTR_UPLOAD,
     ATTR_WITHOUT_BATTERY,
@@ -628,6 +629,7 @@ class PVOutputUploaderOptionsFlow(OptionsFlow):
                     end,
                     user_input[ATTR_METHOD],
                     without_battery=user_input.get(ATTR_WITHOUT_BATTERY, False),
+                    passive_fields=user_input.get(ATTR_PASSIVE_FIELDS, []),
                 )
                 await self.config_entry.runtime_data.async_request_refresh()
                 return self.async_abort(
@@ -656,6 +658,22 @@ class PVOutputUploaderOptionsFlow(OptionsFlow):
                 ),
             }
         )
+        passive = [m.field for m in uploader.passive_mappings]
+        if passive:
+            # Passive fields are recorded but not sent; a reupload may send them.
+            schema = schema.extend(
+                {
+                    vol.Optional(ATTR_PASSIVE_FIELDS, default=passive): SelectSelector(
+                        SelectSelectorConfig(
+                            options=self._field_options(
+                                [f.key for f in FIELD_CATALOG if f.key in passive]
+                            ),
+                            multiple=True,
+                            mode=SelectSelectorMode.LIST,
+                        )
+                    )
+                }
+            )
         defaults = user_input or {
             ATTR_FROM: FROM_FAILURE if first_unsent is not None else FROM_TIME,
             ATTR_START: (today - timedelta(days=1)).strftime("%Y-%m-%d 00:00:00"),

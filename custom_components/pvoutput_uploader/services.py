@@ -30,6 +30,7 @@ ATTR_OVERWRITE = "overwrite"
 ATTR_UPLOAD = "upload"
 ATTR_SINCE_FAILURE = "since_failure"
 ATTR_WITHOUT_BATTERY = "without_battery"
+ATTR_PASSIVE_FIELDS = "passive_fields"
 
 SERVICE_REUPLOAD = "reupload"
 SERVICE_IMPORT = "import_from_recorder"
@@ -40,6 +41,7 @@ REUPLOAD_SCHEMA = vol.Schema(
         vol.Optional(ATTR_START): vol.Any(cv.date, cv.datetime),
         vol.Optional(ATTR_SINCE_FAILURE, default=False): cv.boolean,
         vol.Optional(ATTR_WITHOUT_BATTERY, default=False): cv.boolean,
+        vol.Optional(ATTR_PASSIVE_FIELDS, default=list): vol.All(cv.ensure_list, [cv.string]),
         vol.Optional(ATTR_END): vol.Any(cv.date, cv.datetime),
         vol.Optional(ATTR_METHOD, default=REUPLOAD_AUTO): vol.In(
             [REUPLOAD_AUTO, REUPLOAD_STATUSES, REUPLOAD_OUTPUTS]
@@ -110,7 +112,11 @@ def async_setup_services(hass: HomeAssistant) -> None:
                 translation_domain=DOMAIN, translation_key="end_before_start"
             )
         result = await uploader.async_reupload(
-            start, end, call.data[ATTR_METHOD], without_battery=call.data[ATTR_WITHOUT_BATTERY]
+            start,
+            end,
+            call.data[ATTR_METHOD],
+            without_battery=call.data[ATTR_WITHOUT_BATTERY],
+            passive_fields=call.data[ATTR_PASSIVE_FIELDS],
         )
         await coordinator.async_request_refresh()
         return result

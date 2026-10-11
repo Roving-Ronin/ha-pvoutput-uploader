@@ -193,6 +193,8 @@ async def test_history_from_the_menu(
     assert result["step_id"] == "reupload"
     # No battery fields: no "leave out battery" box.
     assert "without_battery" not in [str(k) for k in result["data_schema"].schema]
+    # No passive fields: no list of them.
+    assert "passive_fields" not in [str(k) for k in result["data_schema"].schema]
     placeholders = result["description_placeholders"]
     assert placeholders["status_days"] == "14"
     assert placeholders["first_unsent"].startswith("none")
@@ -304,6 +306,47 @@ async def test_reupload_has_no_battery_box(
         result["flow_id"], {"next_step_id": "reupload"}
     )
     assert "without_battery" not in [str(k) for k in result["data_schema"].schema]
+
+    assert await hass.config_entries.async_unload(entry.entry_id)
+
+
+async def test_reupload_offers_passive_fields(
+    recorder_mock, hass: HomeAssistant, entry: MockConfigEntry
+) -> None:
+    passive = {
+        "field": "v5", "entity_id": "sensor.outside", "constant": None,
+        "name": "Outside", "active": False, "aggregate": "average",
+    }
+    hass.config_entries.async_update_entry(
+        entry, options=dict(entry.options) | {"fields": [passive]}
+    )
+    with patch(GET_SYSTEM, AsyncMock(return_value=SystemInfo("My System", 5, False))):
+        await _setup(hass, entry)
+
+    result = await hass.config_entries.options.async_init(entry.entry_id)
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"], {"next_step_id": "reupload"}
+    )
+    assert "passive_fields" in [str(k) for k in result["data_schema"].schema]
+    uploader = entry.runtime_data.uploader
+    today = dt_util.now().date().isoformat()
+    with patch.object(
+        uploader,
+        "async_reupload",
+        AsyncMock(return_value={"status_days": 1, "output_days": 0}),
+    ) as reupload:
+        result = await hass.config_entries.options.async_configure(
+            result["flow_id"],
+            {
+                "from": "from_time",
+                "start": f"{today} 00:00:00",
+                "end": f"{today} 23:59:00",
+                "method": "statuses",
+                "passive_fields": ["v5"],
+            },
+        )
+    assert result["reason"] == "reupload_queued"
+    assert reupload.call_args.kwargs["passive_fields"] == ["v5"]
 
     assert await hass.config_entries.async_unload(entry.entry_id)
 

@@ -210,8 +210,9 @@ Field rows show the source friendly name and the unit sent to PVOutput, e.g. `Ou
 Sensors with a unit are converted automatically. For a sensor without one, enter its actual **Source / custom unit** when adding or editing the field (e.g. kW or °F); this is used for conversion, not just a label. Leave it empty when the source reports its unit. Fixed values are entered in PVOutput units; a custom unit applies only to extended fields. Changing a unit affects newly recorded or explicitly rebuilt history; existing samples keep their recorded values.
 
 **Active and passive.** All fields are recorded; only active ones are sent. A passive
-field builds up history in the log, so you can make it active later and reupload its
-past.
+field builds up history in the log. To send that history, either make the field active
+and reupload, or keep it passive and tick it under **Also send passive fields** when
+you reupload: it is then sent for that period only, while live statuses keep it off.
 
 **Working next to another uploader.** Fields that are not active, or not configured, are
 left empty, so PVOutput keeps what another uploader such as IoTaWatt sent for the same
@@ -228,13 +229,20 @@ statuses, and when the first unsent one is. Start:
   or became too old (`since_failure: true` in the action).
 - **From a date and time** you choose (`start:` a date or a date and time).
 
-…up to an end date and time (default now; the action also takes a day, meaning up to its end), sent as:
+…up to an end date and time (default now; the action also takes a day, meaning up to
+its end), sent as:
 
 - *Statuses where allowed, daily totals for older days* (default): days inside PVOutput's
   status window (14 days, 90 for donors) as statuses, older days as daily outputs
 - *Statuses only*: only the days still inside the status window
 - *Daily totals only*: daily outputs (generation, consumption, peak power, min/max
   temperature); these replace the day's totals in PVOutput
+
+**Also send passive fields** (shown when the site has passive fields, all ticked by
+default): the ticked passive fields are sent too, for the statuses of the chosen period
+only. Live statuses and other periods keep them off, and the next reupload replaces the
+choice. Donor-only fields still need a donor account, and battery fields need b1 (active
+or ticked too). In the action: `passive_fields: [v7, b2]`.
 
 Battery fields (`b1`–`b6`) go in the same batches as the other fields, up to 100
 statuses per request for donors, so three weeks of 5 minute statuses (6,048) take about

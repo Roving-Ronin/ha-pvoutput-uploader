@@ -4,10 +4,11 @@ from __future__ import annotations
 
 import asyncio
 from bisect import bisect_left
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 from functools import partial
+import json
 import logging
 import math
 import time
@@ -81,6 +82,8 @@ META_PAUSED_UNTIL = "paused_until"
 META_LAST_PURGE = "last_purge"
 # Statuses up to this slot end are sent in batches without battery values.
 META_NO_BATTERY_UNTIL = "no_battery_until"
+# Passive fields a reupload also sends, and the period: {"from", "to", "fields"}.
+META_PASSIVE_REUPLOAD = "passive_reupload"
 
 REUPLOAD_AUTO = "auto"
 REUPLOAD_STATUSES = "statuses"
@@ -231,17 +234,31 @@ class Uploader:
     @property
     def active_mappings(self) -> list[FieldMapping]:
         """Return the mappings that are sent."""
-        active = [
+        return self._sendable(())
+
+    @property
+    def passive_mappings(self) -> list[FieldMapping]:
+        """Return configured fields that are recorded but not sent (passive)."""
+        return [m for m in self.mappings if not m.active]
+
+    def _sendable(self, extra: Iterable[str]) -> list[FieldMapping]:
+        """Return the active mappings plus the passive fields in ``extra``.
+
+        Passive fields chosen for a reupload follow the same rules as active
+        ones: donor-only fields need a donor account, and battery fields b1.
+        """
+        extra = set(extra)
+        sent = [
             m
             for m in self.mappings
-            if m.active
+            if (m.active or m.field in extra)
             and (self.donor or not FIELDS_BY_KEY[m.field].donor)
             and (m.entity_id or m.constant is not None)
         ]
-        if not any(m.field == BATTERY_POWER for m in active):
+        if not any(m.field == BATTERY_POWER for m in sent):
             # PVOutput ignores the other battery values without b1.
-            active = [m for m in active if not FIELDS_BY_KEY[m.field].battery]
-        return active
+            sent = [m for m in sent if not FIELDS_BY_KEY[m.field].battery]
+        return sent
 
     def window_start(self, now: float) -> int:
         """Return the oldest timestamp PVOutput still takes statuses for."""
@@ -364,14 +381,21 @@ class Uploader:
     # Statuses
 
     def _slot_values(
-        self, slot: int, rows: list[Sample], day_rows: list[Sample]
+        self,
+        slot: int,
+        rows: list[Sample],
+        day_rows: list[Sample],
+        extra: Iterable[str] = (),
     ) -> dict[str, str]:
-        """Return the formatted values of the active fields for one slot."""
+        """Return the formatted values of the fields sent for one slot.
+
+        ``extra`` names passive fields to send too (chosen for a reupload).
+        """
         step = self.upload_interval
         in_slot = [r for r in rows if slot - step < r.ts <= slot]
         values: dict[str, str] = {}
         measured = False
-        for m in self.active_mappings:
+        for m in self._sendable(extra):
             value: float | None
             current = [r.values[m.field] for r in in_slot]
             valid = [v for v in current if v is not None]
@@ -418,6 +442,8 @@ class Uploader:
         # as asked by a reupload (much faster than one request per status).
         stored_until = await self._run(self.store.get_meta, META_NO_BATTERY_UNTIL)
         no_battery_until = int(stored_until) if stored_until and battery else None
+        stored_passive = await self._run(self.store.get_meta, META_PASSIVE_REUPLOAD)
+        passive = json.loads(stored_passive) if stored_passive else None
 
         # Statuses PVOutput did not confirm are retried next cycle, not straight away.
         deferred: set[int] = set()
@@ -472,7 +498,12 @@ class Uploader:
             for slot in slots:
                 day_start, _ = self._day_bounds(_local(slot).date())
                 day_rows = [r for r in rows if r.ts >= day_start]
-                values = self._slot_values(slot, rows, day_rows)
+                extra = (
+                    passive["fields"]
+                    if passive and passive["from"] <= slot and slot - step < passive["to"]
+                    else ()
+                )
+                values = self._slot_values(slot, rows, day_rows, extra)
                 if without_battery:
                     values = self._without_battery(values)
                 if values:
@@ -838,12 +869,15 @@ class Uploader:
         end: date | datetime,
         method: str,
         without_battery: bool = False,
+        passive_fields: Iterable[str] = (),
     ) -> dict[str, int]:
         """Queue history from ``start`` to ``end`` for sending again.
 
         ``end`` is a time (statuses up to it) or a day (to its end). With
         ``without_battery``, everything waiting up to now is sent without
-        battery values; newer statuses keep them.
+        battery values; newer statuses keep them. ``passive_fields`` are sent
+        too, for the statuses of this period only; a later reupload replaces
+        the choice.
         """
         async with self.lock:
             await self._run(
@@ -866,6 +900,7 @@ class Uploader:
             start_day = dt_util.as_local(start).date()
             status_days = 0
             output_days: set[str] = set()
+            passive: str | None = None
 
             if method in (REUPLOAD_AUTO, REUPLOAD_STATUSES):
                 lo = max(start_ts, self._day_bounds(window_day)[0])
@@ -874,6 +909,12 @@ class Uploader:
                 if lo < hi:
                     await self._run(self.store.mark_range, lo, hi, PENDING)
                     status_days = (end - max(start_day, window_day)).days + 1
+                    fields = sorted(
+                        set(passive_fields) & {m.field for m in self.passive_mappings}
+                    )
+                    if fields:
+                        passive = json.dumps({"from": lo, "to": hi - 1, "fields": fields})
+            await self._run(self.store.set_meta, META_PASSIVE_REUPLOAD, passive)
             if method in (REUPLOAD_AUTO, REUPLOAD_OUTPUTS):
                 last = end if method == REUPLOAD_OUTPUTS else min(
                     end, window_day - timedelta(days=1)

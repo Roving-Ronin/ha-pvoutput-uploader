@@ -983,3 +983,55 @@ async def test_reupload_up_to_a_time(
     await up.async_reupload(local_dt(10, 9, 10, 0), local_dt(10, 12, 0, 0), "statuses")
     st = await states(up, 0, 2**40)
     assert [st[t] for t in times] == [PENDING] * 4
+
+
+async def test_reupload_sends_chosen_passive_fields(
+    hass: HomeAssistant, tmp_path: Path, now: FrozenDateTimeFactory
+) -> None:
+    up = await make(hass, tmp_path, [field("v2"), field("v5", active=False)])
+    assert [m.field for m in up.passive_mappings] == ["v5"]
+    old = [local_ts(10, 9, 12, m) for m in (0, 5)]
+    current = local_ts(10, 10, 10, 15)
+    await add(
+        up,
+        *(Sample(t, {"v2": 100.0, "v5": 20.0}, DONE) for t in old),
+        Sample(current, {"v2": 200.0, "v5": 21.0}),
+        last_built=current,
+    )
+    await up.async_reupload(
+        local_dt(10, 9, 12, 0), local_dt(10, 9, 12, 5), "statuses", passive_fields=["v5"]
+    )
+    await up._async_upload_statuses()
+    # The current status keeps the passive field off; the reuploaded period sends it.
+    assert up.client.batches == [
+        [line("10:15", v2="200")],
+        [line("12:00", day="20261009", v2="100", v5="20"),
+         line("12:05", day="20261009", v2="100", v5="20")],
+    ]
+
+    # A reupload without passive fields sends the active ones only again.
+    await up.async_reupload(local_dt(10, 9, 12, 0), local_dt(10, 9, 12, 5), "statuses")
+    assert await up._run(up.store.get_meta, "passive_reupload") is None
+    await up._async_upload_statuses()
+    assert up.client.batches[-1] == [
+        line("12:00", day="20261009", v2="100"),
+        line("12:05", day="20261009", v2="100"),
+    ]
+
+
+async def test_passive_fields_keep_the_rules(
+    hass: HomeAssistant, tmp_path: Path, now: FrozenDateTimeFactory
+) -> None:
+    # Standard account: a passive extended field cannot be sent.
+    up = await make(hass, tmp_path, [field("v2"), field("v12", active=False)])
+    assert [m.field for m in up._sendable(["v12"])] == ["v2"]
+    # Donor: battery fields need b1, active or chosen too.
+    up = await make(
+        hass, tmp_path / "b", [field("v2"), field("b1", active=False), field("b2", active=False)],
+        donor=True,
+    )
+    assert [m.field for m in up._sendable(["b2"])] == ["v2"]
+    assert [m.field for m in up._sendable(["b1", "b2"])] == ["v2", "b1", "b2"]
+    # Fields that are not passive are ignored.
+    await up.async_reupload(local_dt(10, 10), date(2026, 10, 10), "statuses", passive_fields=["v9"])
+    assert await up._run(up.store.get_meta, "passive_reupload") is None
