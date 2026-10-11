@@ -253,6 +253,10 @@ The PVOutput system's device page shows what is uploaded and as what:
 ## Settings
 
 - **Account type**: detect from PVOutput, donor or standard.
+  Donor status is detected when the integration is first added and whenever it reloads.
+  If you become a PVOutput donor later, reload the integration to make extended
+  parameters (`v7`–`v12`) and battery fields (`b1`–`b6`) available, or select
+  **Donor** manually under Account type.
 - **Upload interval**: from PVOutput, 5, 10 or 15 minutes.
 - **Keep history for**: days the log is kept (default 91: the 90 days donors can send statuses for, plus today).
 - **Daily output fallback**: when statuses become too old to send, send that day's
