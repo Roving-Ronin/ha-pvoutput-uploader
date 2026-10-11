@@ -88,6 +88,11 @@ SENSORS = (
         value_fn=lambda u: u.summary.get("cleared"),
     ),
     PVOutputSensorDescription(
+        key="without_battery_samples",
+        entity_category=EntityCategory.DIAGNOSTIC,
+        value_fn=lambda u: u.summary.get("without_battery"),
+    ),
+    PVOutputSensorDescription(
         key="failed_outputs",
         entity_category=EntityCategory.DIAGNOSTIC,
         value_fn=lambda u: u.summary.get("failed_outputs"),
@@ -126,7 +131,8 @@ SENSORS = (
     PVOutputSensorDescription(
         key="last_error",
         entity_category=EntityCategory.DIAGNOSTIC,
-        value_fn=lambda u: (u.last_error or "")[:255] or None,
+        # A recorder problem first: it stays until reading works again.
+        value_fn=lambda u: (u.record_error or u.last_error or "")[:255] or None,
     ),
 )
 

@@ -86,6 +86,14 @@ def test_delta_ignores_small_dips() -> None:
     assert s.delta(0, 300) == pytest.approx(1.0)
 
 
+def test_unchanged_counter_counts_zero() -> None:
+    # The recorder stores a counter only when it changes: no row in a slot while
+    # the counter is available means it did not change, so the slot gets 0.
+    s = series([(0, 100.0), (700, 110.0)], energy=True)
+    assert s.delta(300, 600) == pytest.approx(0.0)
+    assert s.delta(600, 900) == pytest.approx(10.0)
+
+
 def test_delta_with_unavailable_counter() -> None:
     s = series([(0, 100.0), (100, None), (200, 130.0)], energy=True)
     assert s.delta(0, 300) == pytest.approx(30.0)

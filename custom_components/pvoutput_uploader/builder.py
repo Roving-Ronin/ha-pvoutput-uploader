@@ -153,6 +153,10 @@ class _Series:
         None when the counter gave no reading in the slot and is unavailable at
         its end: that is a gap, not zero use. The energy of the gap is counted
         when the counter reports again.
+
+        A counter that is available but reported nothing new in the slot gives
+        0: the recorder stores states only when they change, so an unchanged
+        counter leaves no row, and unchanged means no energy counted.
         """
         i, j = self._index(a), self._index(b)
         end = self.acc[j] if j >= 0 else None

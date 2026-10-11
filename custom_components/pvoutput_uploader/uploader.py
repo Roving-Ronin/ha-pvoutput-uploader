@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-from bisect import bisect_left
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta
@@ -29,7 +28,6 @@ from .builder import (
     Source,
     async_build_from_states,
     async_build_from_statistics,
-    spread_hour,
 )
 from .const import (
     AGG_ENERGY_TODAY,
@@ -196,6 +194,8 @@ class Uploader:
         self.paused_until: float | None = None
         self.last_upload: datetime | None = None
         self.last_error: str | None = None
+        # Kept apart from upload errors: a working upload must not hide it.
+        self.record_error: str | None = None
         self.summary: dict[str, Any] = {}
         # Field key -> (timestamp, value) of its latest recorded value.
         self.latest: dict[str, tuple[int, float]] = {}
@@ -296,7 +296,11 @@ class Uploader:
         async with self.lock:
             try:
                 await self._async_record()
-            except Exception:
+                self.record_error = None
+            except Exception as err:
+                # Uploads go on, but only up to the last slot fully read (last
+                # built), so nothing half-recorded is sent; the next cycle retries.
+                self.record_error = f"Recorder history could not be read: {err}"
                 _LOGGER.exception("Reading recorder history failed")
             if self.upload_enabled:
                 try:
@@ -339,8 +343,10 @@ class Uploader:
         """Return the requests history (backlog, reuploads, daily totals) leaves.
 
         Enough for every current status due before PVOutput's hourly limit
-        resets, plus one, on top of the reserve for other uploaders. Before the
-        reset time is known, a full hour is assumed.
+        resets, plus one, on top of the reserve for other uploaders. Each upload
+        interval needs one request (its current statuses go as one batch,
+        battery values included). Before the reset time is known, a full hour
+        is assumed.
         """
         now = time.time()
         reset = self.client.rate_reset
@@ -439,7 +445,7 @@ class Uploader:
         battery = any(FIELDS_BY_KEY[m.field].battery for m in active)
         per_slot = step // LOG_INTERVAL
         # Statuses up to this slot are sent in batches without battery values,
-        # as asked by a reupload (much faster than one request per status).
+        # as asked by a reupload (the action's without_battery).
         stored_until = await self._run(self.store.get_meta, META_NO_BATTERY_UNTIL)
         no_battery_until = int(stored_until) if stored_until and battery else None
         stored_passive = await self._run(self.store.get_meta, META_PASSIVE_REUPLOAD)
@@ -530,6 +536,15 @@ class Uploader:
             for slot, _ in entries:
                 if slot in confirmed:
                     await self._mark_slot(slot, DONE)
+                    if battery:
+                        # Remember statuses sent without their battery values, so
+                        # it shows which periods a normal reupload would complete.
+                        await self._run(
+                            self.store.set_no_battery,
+                            slot - step + 1,
+                            slot + 1,
+                            without_battery,
+                        )
                 else:
                     await self._unconfirmed(slot, "PVOutput did not add the status", deferred)
             if confirmed:
@@ -605,7 +620,7 @@ class Uploader:
 
     @property
     def sends_battery(self) -> bool:
-        """Return whether battery fields are sent (one request per status)."""
+        """Return whether battery fields are sent."""
         return any(FIELDS_BY_KEY[m.field].battery for m in self.active_mappings)
 
     def _batch_line(self, slot: int, values: dict[str, str]) -> str:
@@ -931,7 +946,14 @@ class Uploader:
     async def async_import(
         self, start: datetime, end: datetime, overwrite: bool, upload: bool
     ) -> dict[str, int]:
-        """Fill the log from recorder states and long term statistics."""
+        """Fill the log from recorder states, then long term statistics.
+
+        Recorded values are kept: states fill missing rows and empty fields
+        (or replace rows with ``overwrite``), and hourly statistics then fill
+        whatever 5 minute rows or fields are still missing. An hour's energy is
+        shared over the missing slots after what recorded rows already hold, so
+        the hour's total matches the statistics.
+        """
         async with self.lock:
             stored = await self._run(self.store.get_meta, META_LAST_BUILT)
             limit = int(stored) if stored else _align_down(time.time(), LOG_INTERVAL)
@@ -949,8 +971,13 @@ class Uploader:
                 )
                 for s in samples:
                     s.uploaded = state
-                await self._run(self.store.add_samples, samples, overwrite=overwrite)
-                from_states += len(samples)
+                if overwrite:
+                    await self._run(self.store.add_samples, samples, overwrite=True)
+                    from_states += len(samples)
+                else:
+                    from_states += await self._run(
+                        self.store.merge_samples, samples, resend=upload
+                    )
                 t = chunk_end
 
             hours = await async_build_from_statistics(
@@ -959,18 +986,53 @@ class Uploader:
                 dt_util.utc_from_timestamp(start_ts),
                 dt_util.utc_from_timestamp(end_ts),
             )
-            existing = await self._run(self.store.existing_ts, start_ts, end_ts + 1)
             aggregates = {s.field: s.aggregate for s in self.sources}
             for hour_end, values in hours:
                 if hour_end - 3600 < start_ts or hour_end > end_ts:
                     continue
-                i = bisect_left(existing, hour_end - 3600 + 1)
-                if i < len(existing) and existing[i] <= hour_end:
-                    continue
-                samples = spread_hour(hour_end, values, aggregates)
-                for s in samples:
-                    s.uploaded = state
-                await self._run(self.store.add_samples, samples)
-                from_stats += len(samples)
+                fill = await self._statistics_fill(hour_end, values, aggregates)
+                if fill:
+                    from_stats += await self._run(
+                        self.store.merge_samples,
+                        [Sample(ts, vals, state) for ts, vals in sorted(fill.items())],
+                        resend=upload,
+                    )
             await self._refresh_summary()
         return {"from_states": from_states, "from_statistics": from_stats}
+
+    async def _statistics_fill(
+        self, hour_end: int, values: dict[str, float | None], aggregates: dict[str, str]
+    ) -> dict[int, dict[str, float]]:
+        """Return the values one statistics hour adds, per 5 minute slot.
+
+        Only slots where a field is missing get it. Energy: the hour's change
+        minus what recorded slots already hold, shared evenly by the rest.
+        Other fields: the hour's value.
+        """
+        stamps = [
+            hour_end - 3600 + (n + 1) * LOG_INTERVAL for n in range(3600 // LOG_INTERVAL)
+        ]
+        rows = {
+            s.ts: s
+            for s in await self._run(self.store.samples_between, stamps[0], hour_end + 1)
+        }
+        fill: dict[int, dict[str, float]] = {}
+        for field, value in values.items():
+            if value is None:
+                continue
+            missing = [
+                ts for ts in stamps if ts not in rows or rows[ts].values.get(field) is None
+            ]
+            if not missing:
+                continue
+            if aggregates.get(field) == AGG_ENERGY_TODAY:
+                have = sum(
+                    v for s in rows.values() if (v := s.values.get(field)) is not None
+                )
+                share = max(value - have, 0.0) / len(missing)
+                for ts in missing:
+                    fill.setdefault(ts, {})[field] = share
+            else:
+                for ts in missing:
+                    fill.setdefault(ts, {})[field] = value
+        return fill

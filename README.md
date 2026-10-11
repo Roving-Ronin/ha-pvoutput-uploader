@@ -266,8 +266,11 @@ show the progress.
 **Configure → Import history from Home Assistant**, or the
 `pvoutput_uploader.import_from_recorder` action. Fills the log for a past period from the
 recorder: 5 minute detail where recorded states still exist (10 days by default), hourly
-long term statistics before that, split evenly into 5 minute rows. Periods already in
-the log are kept unless *Replace recorded values* is on.
+long term statistics for whatever is still missing. Values already in the log are kept
+(unless *Replace recorded values* is on); missing 5 minute rows and missing fields of
+existing rows are filled. Within an hour, the energy from statistics is the hour's total
+minus what recorded rows already hold, shared by the missing slots, so the hour still
+adds up to the statistics; other values take the hour's value.
 
 With *Send to PVOutput* on, the imported period is sent like any backlog; with it off it
 is only stored, ready for a later reupload.
@@ -334,8 +337,9 @@ The PVOutput system's device page shows what is uploaded and as what:
   statuses stay in the log as unsent (**Cleared samples**), and **Reupload history**,
   also *since the first unsent status*, sends them again.
 - Diagnostic sensors: last upload, samples waiting, daily outputs waiting, rejected
-  samples, partly sent samples, cleared samples, rejected daily outputs, history size and
-  start, requests left this hour, rate limit pause, account type, last error.
+  samples, partly sent samples, cleared samples, sent without battery, rejected daily
+  outputs, history size and start, requests left this hour, rate limit pause, account
+  type, last error.
 
 ## Settings
 

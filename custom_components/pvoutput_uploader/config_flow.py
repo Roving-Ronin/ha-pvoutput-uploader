@@ -165,6 +165,8 @@ class PVOutputUploaderOptionsFlow(OptionsFlow):
         self._options: dict[str, Any] = {}
         self._new: dict[str, Any] = {}
         self._edit_field: str | None = None
+        # Fields shown as active on the Active fields page.
+        self._shown_active: set[str] = set()
 
     @property
     def _fields(self) -> list[dict[str, Any]]:
@@ -569,14 +571,21 @@ class PVOutputUploaderOptionsFlow(OptionsFlow):
     ) -> ConfigFlowResult:
         """Make fields active (sent) or passive (recorded only) on one page."""
         if user_input is not None:
-            # Apply to the configuration as saved now, not as first shown.
+            # Only the ticks changed on this page are applied, to the configuration
+            # as saved now: a field switched elsewhere meanwhile keeps that change.
+            ticked = set(user_input[CONF_ACTIVE_FIELDS])
+            turned_on = ticked - self._shown_active
+            turned_off = self._shown_active - ticked
             self._options = deepcopy(DEFAULT_OPTIONS) | deepcopy(dict(self.config_entry.options))
-            active = set(user_input[CONF_ACTIVE_FIELDS])
             for mapping in self._fields:
-                mapping[MAP_ACTIVE] = mapping[MAP_FIELD] in active
+                if mapping[MAP_FIELD] in turned_on:
+                    mapping[MAP_ACTIVE] = True
+                elif mapping[MAP_FIELD] in turned_off:
+                    mapping[MAP_ACTIVE] = False
             return self._save()
         order = {key: n for n, key in enumerate(FIELD_KEYS)}
         fields = sorted(self._fields, key=lambda m: order[m[MAP_FIELD]])
+        self._shown_active = {m[MAP_FIELD] for m in fields if m.get(MAP_ACTIVE, True)}
         return self.async_show_form(
             step_id="active_fields",
             data_schema=vol.Schema(

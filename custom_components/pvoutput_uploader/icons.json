@@ -8,6 +8,7 @@
       "failed_outputs": { "default": "mdi:calendar-remove" },
       "partial_samples": { "default": "mdi:progress-alert" },
       "cleared_samples": { "default": "mdi:playlist-remove" },
+      "without_battery_samples": { "default": "mdi:battery-off-outline" },
       "history_samples": { "default": "mdi:database" },
       "history_oldest": { "default": "mdi:history" },
       "rate_limit_remaining": { "default": "mdi:speedometer" },

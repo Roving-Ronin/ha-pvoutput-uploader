@@ -256,6 +256,9 @@
       "cleared_samples": {
         "name": "Cleared samples"
       },
+      "without_battery_samples": {
+        "name": "Sent without battery"
+      },
       "history_samples": {
         "name": "History samples"
       },

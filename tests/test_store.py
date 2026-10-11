@@ -191,3 +191,39 @@ def test_clear_pending_and_outputs(tmp_path: Path) -> None:
     assert store.queued_outputs(10) == []
     assert store.rejected_outputs() == [("20261001", "bad")]  # still listed
     store.close()
+
+
+def test_merge_keeps_recorded_values(tmp_path: Path) -> None:
+    store = make_store(tmp_path)
+    store.add_samples([Sample(300, {"v1": 5.0}, DONE)])
+    changed = store.merge_samples(
+        [
+            Sample(300, {"v1": 99.0, "v2": 300.0}),  # v1 kept, v2 filled
+            Sample(600, {"v1": 7.0}),  # new row
+            Sample(900, {}),  # nothing to add, but a new (empty) row
+        ],
+        resend=False,
+    )
+    assert changed == 3
+    rows = {s.ts: s for s in store.samples_between(0, 1000)}
+    assert rows[300].values["v1"] == 5.0
+    assert rows[300].values["v2"] == 300.0
+    assert rows[300].uploaded == DONE  # not resent unless asked
+    assert rows[600].values["v1"] == 7.0
+
+    # Filling an empty field with resend queues the row again.
+    assert store.merge_samples([Sample(300, {"v5": 20.0})], resend=True) == 1
+    assert store.samples_between(300, 301)[0].uploaded == PENDING
+    # Nothing new: no change.
+    assert store.merge_samples([Sample(300, {"v1": 1.0})], resend=True) == 0
+    store.close()
+
+
+def test_no_battery_flag(tmp_path: Path) -> None:
+    store = make_store(tmp_path)
+    store.add_samples([Sample(ts, {"v5": 1.0}, DONE) for ts in (300, 600)])
+    store.set_no_battery(0, 601, True)
+    assert store.summary()["without_battery"] == 2
+    store.set_no_battery(300, 301, False)
+    assert store.summary()["without_battery"] == 1
+    store.close()

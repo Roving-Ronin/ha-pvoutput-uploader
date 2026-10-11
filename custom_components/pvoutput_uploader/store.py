@@ -54,6 +54,11 @@ class SampleStore:
         for key in FIELD_KEYS:
             if key not in existing:
                 conn.execute(f"ALTER TABLE samples ADD COLUMN {key} REAL")
+        if "no_battery" not in existing:
+            # Set while a status was last sent without its battery values.
+            conn.execute(
+                "ALTER TABLE samples ADD COLUMN no_battery INTEGER NOT NULL DEFAULT 0"
+            )
         conn.execute(
             "CREATE INDEX IF NOT EXISTS samples_pending ON samples (uploaded, ts)"
         )
@@ -137,6 +142,53 @@ class SampleStore:
             ],
         )
 
+    def merge_samples(self, samples: list[Sample], *, resend: bool) -> int:
+        """Add samples without overwriting recorded values.
+
+        Missing rows are inserted with the sample's upload state. In existing rows
+        only empty fields are filled; such a row is queued again when ``resend``.
+        Returns how many rows were inserted or filled.
+        """
+        assert self._conn is not None
+        cols = ", ".join(FIELD_KEYS)
+        changed = 0
+        with self._lock:
+            for sample in samples:
+                row = self._conn.execute(
+                    f"SELECT {cols} FROM samples WHERE ts = ?", (sample.ts,)
+                ).fetchone()
+                if row is None:
+                    marks = ", ".join("?" * (len(FIELD_KEYS) + 2))
+                    self._conn.execute(
+                        f"INSERT INTO samples (ts, uploaded, {cols}) VALUES ({marks})",
+                        (
+                            sample.ts,
+                            sample.uploaded,
+                            *(sample.values.get(k) for k in FIELD_KEYS),
+                        ),
+                    )
+                    changed += 1
+                    continue
+                have = dict(zip(FIELD_KEYS, row, strict=True))
+                fill = {
+                    k: v
+                    for k, v in sample.values.items()
+                    if v is not None and k in have and have[k] is None
+                }
+                if not fill:
+                    continue
+                sets = ", ".join(f"{k} = ?" for k in fill)
+                params: list[Any] = list(fill.values())
+                if resend:
+                    sets += ", uploaded = ?"
+                    params.append(PENDING)
+                self._conn.execute(
+                    f"UPDATE samples SET {sets} WHERE ts = ?", (*params, sample.ts)
+                )
+                changed += 1
+            self._conn.commit()
+        return changed
+
     def existing_ts(self, start: int, end: int) -> list[int]:
         """Return the sorted timestamps stored in [start, end)."""
         rows = self._execute(
@@ -205,6 +257,13 @@ class SampleStore:
             "INSERT OR IGNORE INTO unconfirmed (slot, since) VALUES (?, ?)", (slot, now)
         )
         return self._execute("SELECT since FROM unconfirmed WHERE slot = ?", (slot,))[0][0]
+
+    def set_no_battery(self, start: int, end: int, without: bool) -> None:
+        """Record whether rows with start <= ts < end were sent without battery values."""
+        self._execute(
+            "UPDATE samples SET no_battery = ? WHERE ts >= ? AND ts < ?",
+            (1 if without else 0, start, end),
+        )
 
     def clear_pending(self, before: int) -> int:
         """Take pending rows older than ``before`` off the queue (cleared).
@@ -301,6 +360,9 @@ class SampleStore:
             "failed": counts.get(FAILED, 0),
             "partial": counts.get(PARTIAL, 0),
             "cleared": counts.get(CLEARED, 0),
+            "without_battery": self._execute(
+                "SELECT COUNT(*) FROM samples WHERE no_battery = 1"
+            )[0][0],
             "expired": counts.get(EXPIRED, 0),
             "oldest": oldest,
             "newest": newest,

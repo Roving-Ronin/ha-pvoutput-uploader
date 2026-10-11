@@ -531,3 +531,26 @@ async def test_active_fields_on_one_page(recorder_mock, hass: HomeAssistant) -> 
     assert {m["field"]: m["active"] for m in entry.options[CONF_FIELDS]} == {
         "v2": False, "v5": True, "v6": True,
     }
+
+
+async def test_active_fields_keep_changes_made_elsewhere(
+    recorder_mock, hass: HomeAssistant
+) -> None:
+    fields = [
+        _mapping("v2", "sensor.power"),
+        _mapping("v5", "sensor.outside") | {"active": False},
+    ]
+    entry = options_entry(hass, fields=fields)
+    result = await _choose(hass, await _menu(hass, entry), "active_fields")
+
+    # While the page is open, v5 is switched on elsewhere (e.g. its switch).
+    hass.config_entries.async_update_entry(
+        entry,
+        options=dict(entry.options)
+        | {CONF_FIELDS: [fields[0], fields[1] | {"active": True}]},
+    )
+    # The page still shows v5 off; only v2 is unticked on it.
+    result = await _configure(hass, result, {"active_fields": []})
+    assert {m["field"]: m["active"] for m in entry.options[CONF_FIELDS]} == {
+        "v2": False, "v5": True,
+    }

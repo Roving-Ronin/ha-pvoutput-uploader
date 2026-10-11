@@ -1035,3 +1035,89 @@ async def test_passive_fields_keep_the_rules(
     # Fields that are not passive are ignored.
     await up.async_reupload(local_dt(10, 10), date(2026, 10, 10), "statuses", passive_fields=["v9"])
     assert await up._run(up.store.get_meta, "passive_reupload") is None
+
+
+async def test_import_fills_a_partial_hour(
+    hass: HomeAssistant, tmp_path: Path, now: FrozenDateTimeFactory
+) -> None:
+    up = await make(
+        hass, tmp_path, [field("v1", aggregate=AGG_ENERGY_TODAY), field("v2")]
+    )
+    # One recorded slot in the hour 9:00-10:00, with energy but no power.
+    recorded = local_ts(10, 10, 9, 5)
+    await add(up, Sample(recorded, {"v1": 5.0}, DONE), last_built=local_ts(10, 10, 10, 15))
+
+    async def from_states(hass_, sources, start, end):
+        return []
+
+    async def from_statistics(hass_, sources, start, end):
+        return [(local_ts(10, 10, 10, 0), {"v1": 60.0, "v2": 300.0})]
+
+    with (
+        patch.object(uploader_module, "async_build_from_states", side_effect=from_states),
+        patch.object(
+            uploader_module, "async_build_from_statistics", side_effect=from_statistics
+        ),
+    ):
+        result = await up.async_import(
+            local_dt(10, 10, 9, 0), local_dt(10, 10, 10, 0), overwrite=False, upload=False
+        )
+
+    # 11 missing slots added, and the recorded one gets its missing power.
+    assert result == {"from_states": 0, "from_statistics": 12}
+    rows = await up._run(up.store.samples_between, local_ts(10, 10, 9, 0) + 1, local_ts(10, 10, 10, 0) + 1)
+    assert len(rows) == 12
+    by_ts = {r.ts: r.values for r in rows}
+    assert by_ts[recorded]["v1"] == 5.0  # recorded value kept
+    assert by_ts[recorded]["v2"] == 300.0
+    # The hour's 60 Wh: 5 recorded, the other 55 shared by the 11 missing slots.
+    assert sum(v["v1"] for v in by_ts.values()) == pytest.approx(60.0)
+    assert all(v["v1"] == pytest.approx(5.0) for ts, v in by_ts.items() if ts != recorded)
+    assert all(v["v2"] == 300.0 for v in by_ts.values())
+
+
+async def test_recorder_failure_sends_only_what_was_read(
+    hass: HomeAssistant, tmp_path: Path, now: FrozenDateTimeFactory
+) -> None:
+    up = await make(hass, tmp_path, [field("v2")])
+    built = local_ts(10, 10, 10, 0)
+    await add(up, Sample(built, {"v2": 100.0}), last_built=built)
+
+    with patch.object(
+        uploader_module, "async_build_from_states", side_effect=RuntimeError("db locked")
+    ):
+        await up.async_cycle()
+    # What was read before is sent; nothing past it is invented.
+    assert await up._run(up.store.get_meta, "last_built") == str(built)
+    assert up.client.batches == [["20261010,10:00,,100"]]
+    assert up.record_error == "Recorder history could not be read: db locked"
+
+    # Reading works again: the error goes, recording catches up.
+    with patch.object(uploader_module, "async_build_from_states", return_value=[]):
+        await up.async_cycle()
+    assert up.record_error is None
+    assert int(await up._run(up.store.get_meta, "last_built")) > built
+
+
+async def test_statuses_sent_without_battery_are_flagged(
+    hass: HomeAssistant, tmp_path: Path, now: FrozenDateTimeFactory
+) -> None:
+    up = await make(hass, tmp_path, [field("v5"), field("b1")], donor=True)
+    times = [local_ts(10, 10, 9, m) for m in (5, 10)]
+    await add(
+        up,
+        *(Sample(t, {"v5": 20.0, "b1": -100.0}, DONE) for t in times),
+        last_built=local_ts(10, 10, 10, 15),
+    )
+    await up.async_reupload(local_dt(10, 10), date(2026, 10, 10), "statuses", without_battery=True)
+    await up._async_upload_statuses()
+    assert (await up._run(up.store.summary))["without_battery"] == 2
+
+    # A normal reupload sends them complete and clears the flag.
+    await up.async_reupload(local_dt(10, 10), date(2026, 10, 10), "statuses")
+    await up._async_upload_statuses()
+    assert up.client.batches[-1] == [
+        line("09:05", v5="20", b1="-100"),
+        line("09:10", v5="20", b1="-100"),
+    ]
+    assert (await up._run(up.store.summary))["without_battery"] == 0

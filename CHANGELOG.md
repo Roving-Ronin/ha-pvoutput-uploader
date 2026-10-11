@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.1.6b7
+
+- **Import history fills partial hours.** Statistics were skipped for a whole hour when any 5 minute row of it was already in the log, leaving the other slots empty for good. Now missing rows and missing fields of existing rows are filled per slot and per field, recorded values are never overwritten, and an hour's energy is shared over the missing slots after what recorded rows hold, so the hour still matches the statistics.
+- **Statuses sent without battery values are flagged**, and counted in the new **Sent without battery** diagnostic sensor; sending them complete later clears the flag.
+- **Recorder errors stay visible.** A failure to read recorder history shows in **Last error** until reading works again (an upload no longer clears it). Uploads still stop at the last fully read slot.
+- **Active fields** applies only the ticks changed on that page, so a field switched elsewhere meanwhile keeps that change.
+- Defined and tested: an energy counter that is available but reported nothing new in a slot counts 0 (the recorder stores only changes); an unavailable one leaves a gap. Comments about one request per battery status updated.
+
 ## 0.1.6b6
 
 - **Make fields active or passive in one go.** Each field has a **Send <field>** switch on the PV site's device page (under Configuration), and **Configure → Active fields** lists every field on one page with a tick for active. Both save the field's Active setting; the site reloads to apply it.
