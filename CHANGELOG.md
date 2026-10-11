@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.1.3
+
+- **b1 (battery power) is mandatory for battery data**, as PVOutput ignores b2-b6 without it: **Add field** offers b2-b6 once b1 is configured, b1 cannot be removed while other battery fields remain, and without an active b1 the other battery fields are not sent. Their field sensors explain why.
+- **b6 (battery state) as a fixed value is picked from a list** of PVOutput's states (0 Invalid, 1 Standby, 2 Thermal management, 3 Enabled, 4 Fault, 5-9 user defined), when adding and when editing. Its field sensor shows the state's name. As a sensor, b6 works like the other fields.
+- README: how to work out a b6 state for a battery that reports none (e.g. a Victron SmartShunt), from battery power and its alarms.
+
 ## 0.1.2
 
 - Prepare for inclusion in the default HACS catalogue: enable all HACS validation checks without exceptions.

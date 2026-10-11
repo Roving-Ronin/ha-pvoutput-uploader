@@ -27,6 +27,8 @@ from homeassistant.util import dt as dt_util
 
 from .const import (
     AGG_ENERGY_TODAY,
+    BATTERY_STATE,
+    BATTERY_STATE_CODES,
     CONF_SYSTEM_ID,
     FIELDS_BY_KEY,
     KIND_ENERGY,
@@ -240,7 +242,10 @@ class FieldSensor(PVOutputEntity, SensorEntity):
                 if name:
                     return name[:255]
             return entity_id.split(".", 1)[-1].replace("_", " ")[:255]
-        return _number(self.mapping.constant or 0)
+        value = self.mapping.constant or 0
+        if self.mapping.field == BATTERY_STATE and int(value) in BATTERY_STATE_CODES:
+            return f"{int(value)} {BATTERY_STATE_CODES[int(value)]}"
+        return _number(value)
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
@@ -257,7 +262,11 @@ class FieldSensor(PVOutputEntity, SensorEntity):
             "pvoutput_unit": self._upload_unit,
         }
         if m.active and not self._configured_to_send:
-            attrs["not_configured_to_send_because"] = "needs a PVOutput donor account"
+            if field.donor and not uploader.donor:
+                reason = "needs a PVOutput donor account"
+            else:
+                reason = "needs an active b1 (battery power): PVOutput ignores battery fields without it"
+            attrs["not_configured_to_send_because"] = reason
         if m.entity_id:
             attrs["source_entity"] = m.entity_id
             state = self.hass.states.get(m.entity_id)

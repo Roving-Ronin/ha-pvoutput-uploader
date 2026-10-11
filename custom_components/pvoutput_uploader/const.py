@@ -110,6 +110,18 @@ FIELD_CATALOG: Final = (
     FieldDef("b6", "Battery State", KIND_RAW, (AGG_LAST,), donor=True, battery=True),
 )
 FIELDS_BY_KEY: Final = {f.key: f for f in FIELD_CATALOG}
+# PVOutput ignores b2-b6 unless b1 (battery power) is sent with them.
+BATTERY_POWER: Final = "b1"
+# b6 is a state code; PVOutput defines 0-4, and 5-9 are left to the user.
+BATTERY_STATE: Final = "b6"
+BATTERY_STATE_CODES: Final = {
+    0: "Invalid",
+    1: "Standby",
+    2: "Thermal management",
+    3: "Enabled",
+    4: "Fault",
+    **{code: f"User defined {code}" for code in range(5, 10)},
+}
 FIELD_KEYS: Final = tuple(f.key for f in FIELD_CATALOG)
 
 STATUS_DAYS_STANDARD: Final = 14

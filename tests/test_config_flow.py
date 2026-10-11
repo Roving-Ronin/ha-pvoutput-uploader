@@ -187,7 +187,11 @@ async def test_add_sensor_field(recorder_mock, hass: HomeAssistant, sensors) -> 
 
 
 async def test_add_constant_field(recorder_mock, hass: HomeAssistant) -> None:
-    entry = options_entry(hass, donor=True)
+    b1 = {
+        "field": "b1", "entity_id": "sensor.battery_power", "constant": None,
+        "name": "Battery Power", "active": True, "aggregate": "average",
+    }
+    entry = options_entry(hass, donor=True, fields=[b1])
     result = await _add(hass, entry, "add_constant")
     offered = select_options(result, "field")
     assert "v12" in offered
@@ -197,10 +201,11 @@ async def test_add_constant_field(recorder_mock, hass: HomeAssistant) -> None:
     result = await _configure(hass, result, {"field": "b3", "constant": 5544, "active": True})
     assert result["type"] is FlowResultType.CREATE_ENTRY
     assert entry.options[CONF_FIELDS] == [
+        b1,
         {
             "field": "b3", "entity_id": None, "constant": 5544,
             "name": "Battery Size", "active": True, "aggregate": "last",
-        }
+        },
     ]
 
 
@@ -324,3 +329,77 @@ async def test_edit_extended_constant_custom_unit(recorder_mock, hass: HomeAssis
     result = await _configure(hass, result, {"constant": 3, "name": "Custom", "active": True, "source_unit": "Wh"})
     assert result["type"] is FlowResultType.CREATE_ENTRY
     assert entry.options[CONF_FIELDS][0]["source_unit"] == "Wh"
+
+
+async def test_b1_is_mandatory_for_battery_fields(
+    recorder_mock, hass: HomeAssistant
+) -> None:
+    # Without b1 only b1 is offered of the battery fields.
+    entry = options_entry(hass, donor=True)
+    result = await _add(hass, entry, "add_sensor")
+    offered = select_options(result, "field")
+    assert "b1" in offered
+    assert not {"b2", "b3", "b4", "b5", "b6"} & set(offered)
+
+    # With b1, the rest follow; b1 cannot be removed while they remain.
+    b1 = {
+        "field": "b1", "entity_id": "sensor.battery_power", "constant": None,
+        "name": "Battery Power", "active": True, "aggregate": "average",
+    }
+    b2 = {
+        "field": "b2", "entity_id": "sensor.battery_soc", "constant": None,
+        "name": "Battery SoC", "active": True, "aggregate": "last",
+    }
+    hass.config_entries.async_update_entry(
+        entry, options=dict(entry.options) | {CONF_FIELDS: [b1, b2]}
+    )
+    result = await _add(hass, entry, "add_constant")
+    assert {"b3", "b4", "b5", "b6"} <= set(select_options(result, "field"))
+
+    result = await _choose(hass, await _menu(hass, entry), "remove_field")
+    result = await _configure(hass, result, {"fields": ["b1"]})
+    assert result["errors"] == {"base": "b1_required"}
+    result = await _configure(hass, result, {"fields": ["b1", "b2"]})
+    assert result["type"] is FlowResultType.CREATE_ENTRY
+    assert entry.options[CONF_FIELDS] == []
+
+
+async def test_battery_state_is_picked_from_a_list(
+    recorder_mock, hass: HomeAssistant
+) -> None:
+    b1 = {
+        "field": "b1", "entity_id": "sensor.battery_power", "constant": None,
+        "name": "Battery Power", "active": True, "aggregate": "average",
+    }
+    entry = options_entry(hass, donor=True, fields=[b1])
+
+    # Other fixed values need a value.
+    result = await _add(hass, entry, "add_constant")
+    result = await _configure(hass, result, {"field": "b3", "active": True})
+    assert result["errors"] == {"constant": "constant_required"}
+
+    # b6 goes to a list of PVOutput's states instead.
+    result = await _configure(hass, result, {"field": "b6", "active": True})
+    assert result["step_id"] == "battery_state"
+    assert select_options(result, "constant") == [str(code) for code in range(10)]
+    labels = {
+        o["value"]: o["label"]
+        for o in result["data_schema"].schema[next(iter(result["data_schema"].schema))].config["options"]
+    }
+    assert labels["3"] == "3 · Enabled"
+    assert labels["4"] == "4 · Fault"
+    result = await _configure(hass, result, {"constant": "3"})
+    assert result["type"] is FlowResultType.CREATE_ENTRY
+    assert entry.options[CONF_FIELDS][-1] == {
+        "field": "b6", "entity_id": None, "constant": 3,
+        "name": "Battery State", "active": True, "aggregate": "last",
+    }
+
+    # Editing it shows the same list, with the current state chosen.
+    result = await _choose(hass, await _menu(hass, entry), "edit_field")
+    result = await _configure(hass, result, {"field": "b6"})
+    assert select_options(result, "constant") == [str(code) for code in range(10)]
+    result = await _configure(
+        hass, result, {"constant": "4", "name": "Battery State", "active": True}
+    )
+    assert entry.options[CONF_FIELDS][-1]["constant"] == 4

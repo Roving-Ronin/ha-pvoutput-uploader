@@ -39,6 +39,9 @@ from .api import PVOutputAuthError, PVOutputClient, PVOutputError
 from .builder import unit_supported
 from .const import (
     AGG_ENERGY_TODAY,
+    BATTERY_POWER,
+    BATTERY_STATE,
+    BATTERY_STATE_CODES,
     CONF_DETECTED_DONOR,
     CONF_DETECTED_INTERVAL,
     CONF_DONOR_MODE,
@@ -187,10 +190,20 @@ class PVOutputUploaderOptionsFlow(OptionsFlow):
         return [f.key for f in FIELD_CATALOG if f.key in used]
 
     def _free_fields(self) -> list[str]:
-        """Return the fields not used yet that the account may send."""
+        """Return the fields not used yet that the account may send.
+
+        Battery fields b2-b6 are offered once b1 (battery power) is configured:
+        PVOutput ignores them without it.
+        """
         used = {m[MAP_FIELD] for m in self._fields}
         donor = self._donor()
-        return [f.key for f in FIELD_CATALOG if f.key not in used and (donor or not f.donor)]
+        return [
+            f.key
+            for f in FIELD_CATALOG
+            if f.key not in used
+            and (donor or not f.donor)
+            and (not f.battery or f.key == BATTERY_POWER or BATTERY_POWER in used)
+        ]
 
     def _field_selector(self, keys: list[str], mode: SelectSelectorMode) -> SelectSelector:
         return SelectSelector(
@@ -226,8 +239,18 @@ class PVOutputUploaderOptionsFlow(OptionsFlow):
             return "unit_required"
         return None if unit_supported(kind, unit) else "unit_mismatch"
 
-    def _constant_selector(self, field: str) -> NumberSelector:
-        """Label fixed values with the known PVOutput unit."""
+    def _constant_selector(self, field: str) -> NumberSelector | SelectSelector:
+        """Label fixed values with the known PVOutput unit; b6 is a list of states."""
+        if field == BATTERY_STATE:
+            return SelectSelector(
+                SelectSelectorConfig(
+                    options=[
+                        SelectOptionDict(value=str(code), label=f"{code} · {label}")
+                        for code, label in BATTERY_STATE_CODES.items()
+                    ],
+                    mode=SelectSelectorMode.LIST,
+                )
+            )
         config = NumberSelectorConfig(mode=NumberSelectorMode.BOX, step="any")
         if unit := upload_unit(field):
             config["unit_of_measurement"] = unit
@@ -240,7 +263,7 @@ class PVOutputUploaderOptionsFlow(OptionsFlow):
             vol.Required(MAP_NAME): TextSelector(),
             vol.Required(MAP_ACTIVE): BooleanSelector(),
         }
-        if has_entity or fdef.kind == "raw":
+        if has_entity or (fdef.kind == "raw" and not fdef.battery):
             schema[vol.Optional(MAP_UNIT)] = TextSelector()
         if has_entity and len(fdef.aggregates) > 1:
             schema[vol.Required(MAP_AGGREGATE)] = SelectSelector(
@@ -363,33 +386,62 @@ class PVOutputUploaderOptionsFlow(OptionsFlow):
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
         """A fixed value sent with every status, such as the battery size."""
+        errors: dict[str, str] = {}
         if user_input is not None:
             field = user_input[MAP_FIELD]
-            self._fields.append(
-                {
-                    MAP_FIELD: field,
-                    MAP_ENTITY: None,
-                    MAP_CONSTANT: user_input[MAP_CONSTANT],
-                    MAP_NAME: user_input.get(MAP_NAME) or FIELDS_BY_KEY[field].name,
-                    MAP_ACTIVE: user_input[MAP_ACTIVE],
-                    MAP_AGGREGATE: FIELDS_BY_KEY[field].default_aggregate,
-                }
-            )
+            new = {
+                MAP_FIELD: field,
+                MAP_ENTITY: None,
+                MAP_CONSTANT: user_input.get(MAP_CONSTANT),
+                MAP_NAME: user_input.get(MAP_NAME) or FIELDS_BY_KEY[field].name,
+                MAP_ACTIVE: user_input[MAP_ACTIVE],
+                MAP_AGGREGATE: FIELDS_BY_KEY[field].default_aggregate,
+            }
             if unit := user_input.get(MAP_UNIT, "").strip():
-                self._fields[-1][MAP_UNIT] = unit
-            return self._save()
+                new[MAP_UNIT] = unit
+            if field == BATTERY_STATE:
+                # The state is picked from a list on the next screen.
+                self._new = new
+                return await self.async_step_battery_state()
+            if new[MAP_CONSTANT] is None:
+                errors[MAP_CONSTANT] = "constant_required"
+            else:
+                self._fields.append(new)
+                return self._save()
         schema = vol.Schema(
             {
                 vol.Required(MAP_FIELD): self._field_selector(
                     self._free_fields(), SelectSelectorMode.DROPDOWN
                 ),
-                vol.Required(MAP_CONSTANT): CONSTANT_SELECTOR,
+                vol.Optional(MAP_CONSTANT): CONSTANT_SELECTOR,
                 vol.Optional(MAP_NAME): TextSelector(),
                 vol.Optional(MAP_UNIT): TextSelector(),
                 vol.Required(MAP_ACTIVE, default=True): BooleanSelector(),
             }
         )
-        return self.async_show_form(step_id="add_constant", data_schema=schema)
+        return self.async_show_form(
+            step_id="add_constant",
+            data_schema=self.add_suggested_values_to_schema(schema, user_input or {}),
+            errors=errors,
+        )
+
+    async def async_step_battery_state(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Pick the fixed battery state (b6) from PVOutput's codes."""
+        if user_input is not None:
+            self._fields.append(
+                self._new
+                | {MAP_CONSTANT: _constant_value(BATTERY_STATE, user_input[MAP_CONSTANT])}
+            )
+            self._new = {}
+            return self._save()
+        return self.async_show_form(
+            step_id="battery_state",
+            data_schema=vol.Schema(
+                {vol.Required(MAP_CONSTANT): self._constant_selector(BATTERY_STATE)}
+            ),
+        )
 
     # Edit and remove
 
@@ -444,7 +496,7 @@ class PVOutputUploaderOptionsFlow(OptionsFlow):
                 if is_sensor:
                     mapping[MAP_ENTITY] = user_input[MAP_ENTITY]
                 else:
-                    mapping[MAP_CONSTANT] = user_input[MAP_CONSTANT]
+                    mapping[MAP_CONSTANT] = _constant_value(field, user_input[MAP_CONSTANT])
                 return self._save()
         source: dict[Any, Any] = (
             {vol.Required(MAP_ENTITY): ENTITY_SELECTOR}
@@ -455,6 +507,8 @@ class PVOutputUploaderOptionsFlow(OptionsFlow):
         defaults = user_input or {
             k: v for k, v in mapping.items() if v is not None and k != MAP_FIELD
         }
+        if field == BATTERY_STATE and not user_input and mapping.get(MAP_CONSTANT) is not None:
+            defaults[MAP_CONSTANT] = str(int(mapping[MAP_CONSTANT]))
         return self.async_show_form(
             step_id="edit_details",
             data_schema=self.add_suggested_values_to_schema(schema, defaults),
@@ -466,11 +520,19 @@ class PVOutputUploaderOptionsFlow(OptionsFlow):
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
         """Remove fields."""
+        errors: dict[str, str] = {}
         if user_input is not None:
             drop = set(user_input[CONF_FIELDS])
-            self._options[CONF_FIELDS] = [m for m in self._fields if m[MAP_FIELD] not in drop]
-            return self._save()
+            keep = [m for m in self._fields if m[MAP_FIELD] not in drop]
+            if BATTERY_POWER in drop and any(
+                FIELDS_BY_KEY[m[MAP_FIELD]].battery for m in keep
+            ):
+                errors["base"] = "b1_required"
+            else:
+                self._options[CONF_FIELDS] = keep
+                return self._save()
         return self.async_show_form(
+            errors=errors,
             step_id="remove_field",
             data_schema=vol.Schema(
                 {
@@ -666,3 +728,10 @@ def _local_datetime(value: str) -> datetime:
     if parsed is None:
         raise vol.Invalid(f"Invalid date and time: {value}")
     return parsed if parsed.tzinfo else parsed.replace(tzinfo=dt_util.get_default_time_zone())
+
+
+def _constant_value(field: str, value: Any) -> float | int:
+    """Return a fixed value as stored; b6 states come from a list as text."""
+    if field == BATTERY_STATE:
+        return int(value)
+    return value

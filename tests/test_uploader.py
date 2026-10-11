@@ -757,3 +757,33 @@ async def test_requests_are_spaced(
     assert len(up.client.singles) == 3
     assert len(waits) == 2
     assert all(4 < w <= 5 for w in waits)
+
+
+async def test_battery_fields_need_b1(
+    hass: HomeAssistant, tmp_path: Path, now: FrozenDateTimeFactory
+) -> None:
+    fields = [field("v5"), field("b2", aggregate=AGG_LAST), field("b3", entity=None, constant=5544)]
+    up = await make(hass, tmp_path, fields, donor=True)
+    # PVOutput would ignore b2 and b3 without b1, so they are not sent.
+    assert [m.field for m in up.active_mappings] == ["v5"]
+    ts = local_ts(10, 10, 10, 5)
+    await add(up, Sample(ts, {"v5": 20.0, "b2": 80.0}), last_built=ts)
+    await up._async_upload_statuses()
+    assert up.client.batches == [["20261010,10:05,,,,,20"]]
+    assert up.client.singles == []
+
+    # An inactive b1 does not count either.
+    up = await make(hass, tmp_path / "b", [*fields, field("b1", active=False)], donor=True)
+    assert [m.field for m in up.active_mappings] == ["v5"]
+
+
+async def test_fixed_battery_state_is_sent(
+    hass: HomeAssistant, tmp_path: Path, now: FrozenDateTimeFactory
+) -> None:
+    up = await make(
+        hass, tmp_path, [field("b1"), field("b6", entity=None, constant=3)], donor=True
+    )
+    ts = local_ts(10, 10, 10, 5)
+    await add(up, Sample(ts, {"b1": -250.0}), last_built=ts)
+    await up._async_upload_statuses()
+    assert up.client.singles == [{"d": "20261010", "t": "10:05", "b1": "-250", "b6": "3"}]

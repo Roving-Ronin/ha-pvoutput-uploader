@@ -153,11 +153,43 @@ Each action saves as soon as it is submitted.
 | v5 | Temperature | °C |
 | v6 | Voltage | V |
 | v7-v12 | Extended (donor) | average, last value, or energy since midnight |
-| b1 | Battery power (donor) | W |
+| b1 | Battery power (donor), **mandatory for battery data** | W (+ charging, − discharging) |
 | b2 | Battery state of charge (donor) | % |
 | b3 | Battery size (donor) | Wh |
 | b4 / b5 | Battery lifetime charge / discharge (donor) | Wh |
-| b6 | Battery state (donor) | Numeric state code, no unit |
+| b6 | Battery state (donor) | State code: 0 Invalid, 1 Standby, 2 Thermal management, 3 Enabled, 4 Fault, 5-9 user defined. As a fixed value it is picked from this list. |
+
+**b1 is mandatory for battery data.** PVOutput ignores b2-b6 in a status without b1, so
+**Add field** offers b2-b6 only once b1 is configured, b1 cannot be removed while other
+battery fields remain, and without an active b1 the other battery fields are not sent
+(their field sensors say why).
+
+**A b6 state when the battery does not report one.** Battery monitors such as a Victron
+SmartShunt have no device state, but b6 can be worked out from what they do report:
+battery power, an alarm flag and the alarm reason. A template sensor, mapped to b6 with
+*Last value*:
+
+```yaml
+template:
+  - sensor:
+      - name: "Battery State"
+        unique_id: battery_state_pvoutput
+        state: >
+          {% set p = states('sensor.battery_power') %}
+          {% set alarm = is_state('binary_sensor.battery_has_alarm', 'on') %}
+          {% set reason = states('sensor.battery_alarm_reason') %}
+          {% if not is_number(p) %} 0
+          {% elif alarm and 'Temperature' in reason %} 2
+          {% elif alarm %} 4
+          {% elif p | float | abs >= 20 %} 3
+          {% else %} 1
+          {% endif %}
+```
+
+That is 0 Invalid when there is no data, 2 Thermal management on a temperature alarm, 4
+Fault on any other alarm, 3 Enabled while charging or discharging (20 W or more, so noise
+does not flip it), and 1 Standby otherwise. Replace the entity IDs with your battery's.
+With ESPHome the same logic can run on the device as a `template` sensor.
 
 Sensor units are converted (kWh to Wh, kW to W, °F to °C, ...). Sensors must be
 recorded by the Home Assistant recorder (they are unless you excluded them).

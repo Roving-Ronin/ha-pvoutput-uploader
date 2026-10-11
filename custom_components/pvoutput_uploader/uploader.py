@@ -32,6 +32,7 @@ from .builder import (
 from .const import (
     AGG_ENERGY_TODAY,
     AGG_LAST,
+    BATTERY_POWER,
     CONF_DETECTED_DONOR,
     CONF_DETECTED_INTERVAL,
     CONF_DONOR_MODE,
@@ -221,13 +222,17 @@ class Uploader:
     @property
     def active_mappings(self) -> list[FieldMapping]:
         """Return the mappings that are sent."""
-        return [
+        active = [
             m
             for m in self.mappings
             if m.active
             and (self.donor or not FIELDS_BY_KEY[m.field].donor)
             and (m.entity_id or m.constant is not None)
         ]
+        if not any(m.field == BATTERY_POWER for m in active):
+            # PVOutput ignores the other battery values without b1.
+            active = [m for m in active if not FIELDS_BY_KEY[m.field].battery]
+        return active
 
     def window_start(self, now: float) -> int:
         """Return the oldest timestamp PVOutput still takes statuses for."""
