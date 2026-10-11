@@ -873,8 +873,9 @@ async def test_current_statuses_go_before_history(
         Sample(current, {"v5": 21.0, "b1": -200.0}),
         last_built=current,
     )
-    # 20 requests left: below the history reserve (30), above the reserve (5).
-    up.client.rate_remaining = 20
+    # 10 requests left: below the history reserve (5 + 8 statuses due before
+    # 11:00 + 1 = 14), above the reserve for other uploaders (5).
+    up.client.rate_remaining = 10
     up.client.rate_reset = local_ts(10, 10, 11, 0)
     await up._async_upload_statuses()
 
@@ -892,10 +893,31 @@ async def test_history_keeps_its_own_reserve(
     await add(up, Sample(old, {"v2": 100.0}), last_built=local_ts(10, 10, 10, 15))
     up.client.rate_reset = local_ts(10, 10, 11, 0)
 
-    up.client.rate_remaining = 30
+    # 40 minutes to the reset at 11:00: 8 current statuses due, so history
+    # leaves 5 + 8 + 1 = 14 requests.
+    up.client.rate_remaining = 14
     await up._async_upload_statuses()
     assert up.client.batches == []
 
-    up.client.rate_remaining = 31
+    up.client.rate_remaining = 15
     await up._async_upload_statuses()
     assert up.client.batches == [["20261009,12:00,,100"]]
+
+
+async def test_history_reserve_follows_the_reset(
+    hass: HomeAssistant, tmp_path: Path, now: FrozenDateTimeFactory
+) -> None:
+    up = await make(hass, tmp_path, [field("v2")])  # 5 minute interval; now 10:20
+    # Not known yet: a full hour, 12 statuses.
+    assert up._history_reserve() == 5 + 12 + 1
+    up.client.rate_reset = local_ts(10, 10, 11, 0)
+    assert up._history_reserve() == 5 + 8 + 1
+    now.move_to(local_dt(10, 10, 10, 58))
+    assert up._history_reserve() == 5 + 1 + 1
+    # Past the reset: a new hour.
+    now.move_to(local_dt(10, 10, 11, 1))
+    assert up._history_reserve() == 5 + 12 + 1
+
+    up = await make(hass, tmp_path / "b", [field("v2")], **{CONF_UPLOAD_INTERVAL: "15"})
+    up.client.rate_reset = local_ts(10, 10, 11, 31)
+    assert up._history_reserve() == 5 + 2 + 1  # 30 minutes, 15 minute interval

@@ -9,6 +9,7 @@ from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 from functools import partial
 import logging
+import math
 import time
 from typing import Any, TypeVar
 
@@ -60,7 +61,6 @@ from .const import (
     UNCONFIRMED_RETRY_SECONDS,
     OUTPUT_BATCH_DONOR,
     RATE_RESERVE,
-    BACKLOG_RESERVE,
     CURRENT_SLOTS,
     REQUEST_SPACING_SECONDS,
     SETTLE_SECONDS,
@@ -313,8 +313,25 @@ class Uploader:
             await _sleep(wait)
         self._last_request = time.monotonic()
 
-    def _rate_ok(self, reserve: int = BACKLOG_RESERVE) -> bool:
-        """Return whether a request may be made, keeping ``reserve`` requests."""
+    def _history_reserve(self) -> int:
+        """Return the requests history (backlog, reuploads, daily totals) leaves.
+
+        Enough for every current status due before PVOutput's hourly limit
+        resets, plus one, on top of the reserve for other uploaders. Before the
+        reset time is known, a full hour is assumed.
+        """
+        now = time.time()
+        reset = self.client.rate_reset
+        left = reset - now if reset is not None and reset > now else 3600
+        return RATE_RESERVE + math.ceil(left / self.upload_interval) + 1
+
+    def _rate_ok(self, reserve: int | None = None) -> bool:
+        """Return whether a request may be made, keeping ``reserve`` requests.
+
+        Without ``reserve``, the history reserve applies.
+        """
+        if reserve is None:
+            reserve = self._history_reserve()
         now = time.time()
         if self.paused_until is not None:
             if now < self.paused_until:
@@ -416,7 +433,7 @@ class Uploader:
                 slots = current[: 1 if single else self._batch_limit]
             else:
                 # History: oldest first, and only while the backlog reserve allows.
-                if not self._rate_ok(BACKLOG_RESERVE):
+                if not self._rate_ok(self._history_reserve()):
                     return
                 without_battery = False
                 if no_battery_until is not None:

@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.6b2
+
+- **The history reserve is worked out, not fixed.** History stops when the requests left would only just cover every current status due before PVOutput's hourly limit resets, plus one, on top of the reserve of 5 for other uploaders. A 5 minute site with 40 minutes to go keeps 14; near the end of the hour, 7. Before the reset time is known, a full hour is assumed (18 at 5 minutes). Replaces the fixed 30 from 0.1.6b1, so a backlog gets almost the whole hour.
+
 ## 0.1.6b1
 
 - **Current statuses go first.** The statuses of the last two upload intervals are sent before any history, so live data no longer waits behind a long backlog (it was oldest first).
