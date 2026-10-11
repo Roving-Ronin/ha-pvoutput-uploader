@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.1.6
+
+Stable release of the 0.1.6 betas (b1-b12). Highlights since 0.1.5:
+
+- **Battery fields go in batches** (b1-b6 after v12): undocumented by PVOutput but tested and confirmed. Weeks of history go out in minutes.
+- **Live data first:** current statuses are sent before any history, and history stops early enough to leave each hour's live statuses their requests (worked out from PVOutput's reset time), with 5 requests always kept for other uploaders. Requests are at least 0.3 s apart.
+- **Clear queued history** button (Controls): takes the waiting backlog off the queue without deleting anything.
+- **Active or passive per field** from a switch on the device page, or all fields on one page under Configure → Active fields.
+- **Passive fields on reupload and import:** Also send passive fields sends them for the chosen period only; each operation keeps its own choice per period, and sites with only passive fields send too.
+- **Reupload** To takes a time as well as a day.
+- **Import fills partial hours** per 5 minute row and field, keeps recorded values, shares an hour's energy over the gaps, and logs when recorded energy exceeds the statistics.
+- **Diagnostics:** Cleared samples, Sent without battery; recorder read errors stay in Last error until reading works again.
+- Removed a stray `config_flow.py.bak` shipped since 0.1.5.
+
+Details per beta below.
+
 ## 0.1.6b12
 
 - **Statuses longer than 5 minutes across two passive-field choices** (e.g. 15 minute statuses where a reupload or import starts or ends inside one) send the passive fields of every choice that holds one of their rows, each aggregated over the whole status like any other field. Before, only one choice applied. 5 minute statuses are unchanged.
