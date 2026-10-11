@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.1.6b10
+
+- **Passive-field choices no longer overwrite each other.** Each reupload or import keeps its own passive fields for its own period, also while an earlier one is still being sent; where periods overlap, the newest choice wins. Choices are dropped once nothing in their period is waiting.
+- **Sites with only passive fields** now send what a reupload or import chose; before, nothing was sent when no field was active.
+
 ## 0.1.6b9
 
 - **Import history → Also send passive fields**, like on Reupload history: with Send to PVOutput on, the ticked passive fields (all by default; shown only when the site has passive fields) are sent too, for the imported period only. Statuses PVOutput already has for that period are sent again to add them. The `import_from_recorder` action takes `passive_fields`.

@@ -428,7 +428,10 @@ class Uploader:
 
     async def _async_upload_statuses(self) -> None:
         active = self.active_mappings
-        if not active:
+        windows = await self._prune_passive_windows()
+        # A site with only passive fields still sends what a reupload or import
+        # chose for its period.
+        if not active and not any(w["fields"] for w in windows):
             return
         step = self.upload_interval
         now = time.time()
@@ -448,8 +451,6 @@ class Uploader:
         # as asked by a reupload (the action's without_battery).
         stored_until = await self._run(self.store.get_meta, META_NO_BATTERY_UNTIL)
         no_battery_until = int(stored_until) if stored_until and battery else None
-        stored_passive = await self._run(self.store.get_meta, META_PASSIVE_REUPLOAD)
-        passive = json.loads(stored_passive) if stored_passive else None
 
         # Statuses PVOutput did not confirm are retried next cycle, not straight away.
         deferred: set[int] = set()
@@ -504,11 +505,7 @@ class Uploader:
             for slot in slots:
                 day_start, _ = self._day_bounds(_local(slot).date())
                 day_rows = [r for r in rows if r.ts >= day_start]
-                extra = (
-                    passive["fields"]
-                    if passive and passive["from"] <= slot and slot - step < passive["to"]
-                    else ()
-                )
+                extra = self._passive_for(windows, slot, step)
                 values = self._slot_values(slot, rows, day_rows, extra)
                 if without_battery:
                     values = self._without_battery(values)
@@ -915,7 +912,6 @@ class Uploader:
             start_day = dt_util.as_local(start).date()
             status_days = 0
             output_days: set[str] = set()
-            passive: str | None = None
 
             if method in (REUPLOAD_AUTO, REUPLOAD_STATUSES):
                 lo = max(start_ts, self._day_bounds(window_day)[0])
@@ -924,12 +920,8 @@ class Uploader:
                 if lo < hi:
                     await self._run(self.store.mark_range, lo, hi, PENDING)
                     status_days = (end - max(start_day, window_day)).days + 1
-                    fields = sorted(
-                        set(passive_fields) & {m.field for m in self.passive_mappings}
-                    )
-                    if fields:
-                        passive = json.dumps({"from": lo, "to": hi - 1, "fields": fields})
-            await self._run(self.store.set_meta, META_PASSIVE_REUPLOAD, passive)
+                    # This period sends these passive fields (none: active only).
+                    await self._set_passive_window(lo, hi - 1, passive_fields)
             if method in (REUPLOAD_AUTO, REUPLOAD_OUTPUTS):
                 last = end if method == REUPLOAD_OUTPUTS else min(
                     end, window_day - timedelta(days=1)
@@ -1015,20 +1007,65 @@ class Uploader:
             await self._refresh_summary()
         return {"from_states": from_states, "from_statistics": from_stats}
 
-    async def _set_passive_window(
-        self, start: int, end: int, passive_fields: Iterable[str]
-    ) -> bool:
-        """Send the given passive fields too for statuses in [start, end].
+    async def _passive_windows(self) -> list[dict[str, Any]]:
+        """Return the passive-field choices of reuploads and imports, oldest first.
 
-        Returns whether any (still passive) field was chosen.
+        Each is {"from", "to", "fields"}: statuses ending in [from, to] also
+        send those passive fields. A newer window wins where windows overlap.
         """
-        fields = sorted(set(passive_fields) & {m.field for m in self.passive_mappings})
+        stored = await self._run(self.store.get_meta, META_PASSIVE_REUPLOAD)
+        if not stored:
+            return []
+        windows = json.loads(stored)
+        # Before 0.1.6b10 a single window was stored.
+        return windows if isinstance(windows, list) else [windows]
+
+    async def _save_passive_windows(self, windows: list[dict[str, Any]]) -> None:
         await self._run(
             self.store.set_meta,
             META_PASSIVE_REUPLOAD,
-            json.dumps({"from": start, "to": end, "fields": fields}) if fields else None,
+            json.dumps(windows) if windows else None,
         )
+
+    async def _set_passive_window(
+        self, start: int, end: int, passive_fields: Iterable[str]
+    ) -> bool:
+        """Record which passive fields statuses in [start, end] also send.
+
+        The window is added to the others, so an operation still sending keeps
+        its own choice; where they overlap, this newest one wins. Windows it
+        fully covers are dropped. Returns whether any (still passive) field
+        was chosen.
+        """
+        fields = sorted(set(passive_fields) & {m.field for m in self.passive_mappings})
+        windows = [
+            w
+            for w in await self._passive_windows()
+            if not (start <= w["from"] and w["to"] <= end)
+        ]
+        windows.append({"from": start, "to": end, "fields": fields})
+        await self._save_passive_windows(windows)
         return bool(fields)
+
+    async def _prune_passive_windows(self) -> list[dict[str, Any]]:
+        """Drop windows with nothing left to send in their period; return the rest."""
+        windows = await self._passive_windows()
+        keep = [
+            w
+            for w in windows
+            if await self._run(self.store.first_pending, w["from"], w["to"]) is not None
+        ]
+        if len(keep) != len(windows):
+            await self._save_passive_windows(keep)
+        return keep
+
+    @staticmethod
+    def _passive_for(windows: list[dict[str, Any]], slot: int, step: int) -> list[str]:
+        """Return the passive fields the slot ending at ``slot`` also sends."""
+        for w in reversed(windows):
+            if w["from"] <= slot and slot - step < w["to"]:
+                return w["fields"]
+        return []
 
     async def _statistics_fill(
         self, hour_end: int, values: dict[str, float | None], aggregates: dict[str, str]

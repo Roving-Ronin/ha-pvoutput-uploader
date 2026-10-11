@@ -1011,7 +1011,8 @@ async def test_reupload_sends_chosen_passive_fields(
 
     # A reupload without passive fields sends the active ones only again.
     await up.async_reupload(local_dt(10, 9, 12, 0), local_dt(10, 9, 12, 5), "statuses")
-    assert await up._run(up.store.get_meta, "passive_reupload") is None
+    # It replaces the earlier choice for that period: no passive fields there.
+    assert [w["fields"] for w in await up._passive_windows()] == [[]]
     await up._async_upload_statuses()
     assert up.client.batches[-1] == [
         line("12:00", day="20261009", v2="100"),
@@ -1034,7 +1035,7 @@ async def test_passive_fields_keep_the_rules(
     assert [m.field for m in up._sendable(["b1", "b2"])] == ["v2", "b1", "b2"]
     # Fields that are not passive are ignored.
     await up.async_reupload(local_dt(10, 10), date(2026, 10, 10), "statuses", passive_fields=["v9"])
-    assert await up._run(up.store.get_meta, "passive_reupload") is None
+    assert all(not w["fields"] for w in await up._passive_windows())
 
 
 async def test_import_fills_a_partial_hour(
@@ -1205,3 +1206,85 @@ async def test_import_sends_chosen_passive_fields(
         )
     st = await states(up, 0, 2**40)
     assert [st[t] for t in times] == [DONE, DONE]
+
+
+async def test_two_operations_keep_their_passive_fields(
+    hass: HomeAssistant, tmp_path: Path, now: FrozenDateTimeFactory
+) -> None:
+    up = await make(
+        hass, tmp_path, [field("v2"), field("v5", active=False), field("v6", active=False)]
+    )
+    a = [local_ts(10, 9, 12, m) for m in (0, 5)]
+    b = [local_ts(10, 9, 14, m) for m in (0, 5)]
+    await add(
+        up,
+        *(Sample(t, {"v2": 100.0, "v5": 20.0, "v6": 230.0}, DONE) for t in a + b),
+        last_built=local_ts(10, 10, 10, 15),
+    )
+    # A reupload with v5, then, before it is sent, another one with v6.
+    await up.async_reupload(local_dt(10, 9, 12, 0), local_dt(10, 9, 12, 5), "statuses", passive_fields=["v5"])
+    await up.async_reupload(local_dt(10, 9, 14, 0), local_dt(10, 9, 14, 5), "statuses", passive_fields=["v6"])
+    await up._async_upload_statuses()
+    assert up.client.batches == [
+        [
+            line("12:00", day="20261009", v2="100", v5="20"),
+            line("12:05", day="20261009", v2="100", v5="20"),
+            line("14:00", day="20261009", v2="100", v6="230"),
+            line("14:05", day="20261009", v2="100", v6="230"),
+        ]
+    ]
+    # Everything sent: the windows are dropped on the next cycle.
+    await up._async_upload_statuses()
+    assert await up._passive_windows() == []
+
+
+async def test_newest_choice_wins_where_periods_overlap(
+    hass: HomeAssistant, tmp_path: Path, now: FrozenDateTimeFactory
+) -> None:
+    up = await make(hass, tmp_path, [field("v2"), field("v5", active=False)])
+    a = local_ts(10, 9, 12, 0)
+    b = local_ts(10, 9, 14, 0)
+    await add(
+        up,
+        *(Sample(t, {"v2": 100.0, "v5": 20.0}, DONE) for t in (a, b)),
+        last_built=local_ts(10, 10, 10, 15),
+    )
+    await up.async_reupload(local_dt(10, 9, 12, 0), local_dt(10, 9, 14, 0), "statuses", passive_fields=["v5"])
+    # The later period again, now without passive fields.
+    await up.async_reupload(local_dt(10, 9, 13, 0), local_dt(10, 9, 14, 0), "statuses")
+    await up._async_upload_statuses()
+    assert up.client.batches == [
+        [
+            line("12:00", day="20261009", v2="100", v5="20"),
+            line("14:00", day="20261009", v2="100"),
+        ]
+    ]
+
+
+async def test_passive_only_site_sends_imported_passive_fields(
+    hass: HomeAssistant, tmp_path: Path, now: FrozenDateTimeFactory
+) -> None:
+    up = await make(hass, tmp_path, [field("v5", active=False)])
+    assert up.active_mappings == []
+    times = [local_ts(10, 9, 12, m) for m in (0, 5)]
+    await add(
+        up,
+        *(Sample(t, {"v5": 20.0}, DONE) for t in times),
+        last_built=local_ts(10, 10, 10, 15),
+    )
+
+    async def nothing(*args):
+        return []
+
+    with (
+        patch.object(uploader_module, "async_build_from_states", side_effect=nothing),
+        patch.object(uploader_module, "async_build_from_statistics", side_effect=nothing),
+    ):
+        await up.async_import(
+            local_dt(10, 9, 12, 0), local_dt(10, 9, 12, 5),
+            overwrite=False, upload=True, passive_fields=["v5"],
+        )
+    await up._async_upload_statuses()
+    assert up.client.batches == [
+        [line("12:00", day="20261009", v5="20"), line("12:05", day="20261009", v5="20")]
+    ]

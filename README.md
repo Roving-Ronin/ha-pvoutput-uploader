@@ -242,9 +242,11 @@ its end), sent as:
 
 **Also send passive fields** (shown when the site has passive fields, all ticked by
 default): the ticked passive fields are sent too, for the statuses of the chosen period
-only. Live statuses and other periods keep them off, and the next reupload replaces the
-choice. Donor-only fields still need a donor account, and battery fields need b1 (active
-or ticked too). In the action: `passive_fields: [v7, b2]`.
+only. Live statuses and other periods keep them off. Each reupload or import keeps its
+own choice for its own period, also while an earlier one is still sending; where periods
+overlap, the newest choice wins. A site whose fields are all passive still sends what
+a reupload or import chose. Donor-only fields still need a donor account, and battery
+fields need b1 (active or ticked too). In the action: `passive_fields: [v7, b2]`.
 
 Battery fields (`b1`–`b6`) go in the same batches as the other fields, up to 100
 statuses per request for donors, so three weeks of 5 minute statuses (6,048) take about
