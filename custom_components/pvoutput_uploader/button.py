@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from homeassistant.components.button import ButtonEntity
-from homeassistant.const import EntityCategory
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 
@@ -25,9 +24,10 @@ class ClearQueueButton(PVOutputEntity, ButtonEntity):
 
     Nothing is deleted: cleared statuses stay in the history log as unsent and
     can be sent again with Reupload history.
-    """
 
-    _attr_entity_category = EntityCategory.CONFIG
+    No entity category: it sits with the Uploading switch under Controls, apart
+    from the per-field switches under Configuration.
+    """
 
     @property
     def available(self) -> bool:

@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.1.6b8
+
+- **Import: recorded energy above the statistics.** When the recorded 5 minute rows of an hour already hold more energy than the hourly statistics, the recorded values are kept, the missing slots get 0, and a warning in the log names the hour and both totals, instead of the hour silently not matching. README corrected.
+- **Clear queued history** moved from Configuration to Controls, next to the Uploading switch, so the Configuration card holds only the per-field switches.
+
 ## 0.1.6b7
 
 - **Import history fills partial hours.** Statistics were skipped for a whole hour when any 5 minute row of it was already in the log, leaving the other slots empty for good. Now missing rows and missing fields of existing rows are filled per slot and per field, recorded values are never overwritten, and an hour's energy is shared over the missing slots after what recorded rows hold, so the hour still matches the statistics.

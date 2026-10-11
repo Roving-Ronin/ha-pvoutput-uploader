@@ -1006,8 +1006,10 @@ class Uploader:
         """Return the values one statistics hour adds, per 5 minute slot.
 
         Only slots where a field is missing get it. Energy: the hour's change
-        minus what recorded slots already hold, shared evenly by the rest.
-        Other fields: the hour's value.
+        minus what recorded slots already hold, shared evenly by the rest;
+        never negative: when recorded slots already exceed the statistics,
+        they are kept, the rest get 0 and a warning is logged. Other fields:
+        the hour's value.
         """
         stamps = [
             hour_end - 3600 + (n + 1) * LOG_INTERVAL for n in range(3600 // LOG_INTERVAL)
@@ -1029,6 +1031,18 @@ class Uploader:
                 have = sum(
                     v for s in rows.values() if (v := s.values.get(field)) is not None
                 )
+                if have > value:
+                    # Recorded readings are kept as they are; the gaps get nothing,
+                    # so this hour holds more than the statistics say.
+                    _LOGGER.warning(
+                        "Import: recorded %s energy for the hour to %s (%.0f Wh) "
+                        "exceeds the long term statistics (%.0f Wh); keeping the "
+                        "recorded values, the missing slots get 0",
+                        field,
+                        _local(hour_end).isoformat(),
+                        have,
+                        value,
+                    )
                 share = max(value - have, 0.0) / len(missing)
                 for ts in missing:
                     fill.setdefault(ts, {})[field] = share

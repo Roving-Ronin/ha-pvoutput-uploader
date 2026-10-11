@@ -270,7 +270,9 @@ long term statistics for whatever is still missing. Values already in the log ar
 (unless *Replace recorded values* is on); missing 5 minute rows and missing fields of
 existing rows are filled. Within an hour, the energy from statistics is the hour's total
 minus what recorded rows already hold, shared by the missing slots, so the hour still
-adds up to the statistics; other values take the hour's value.
+adds up to the statistics; other values take the hour's value. If the recorded rows
+already hold more energy than the statistics, they are kept as they are (real readings
+win), the missing slots get 0, and a warning in the log names the hour.
 
 With *Send to PVOutput* on, the imported period is sent like any backlog; with it off it
 is only stored, ready for a later reupload.
@@ -331,7 +333,7 @@ The PVOutput system's device page shows what is uploaded and as what:
 - **Send <field>** switches, one per field (e.g. *Send v5 Ambient*), under
   Configuration: on makes the field active, off passive. Switching saves the
   configuration and the site reloads to apply it, which takes a few seconds.
-- **Clear queued history** button: takes the waiting history off the queue (statuses
+- **Clear queued history** button (under Controls, next to Uploading): takes the waiting history off the queue (statuses
   older than the last two upload intervals, and queued daily totals) and ends a "leave
   out battery fields" run. Current statuses keep going. Nothing is deleted: cleared
   statuses stay in the log as unsent (**Cleared samples**), and **Reupload history**,

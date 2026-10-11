@@ -1121,3 +1121,44 @@ async def test_statuses_sent_without_battery_are_flagged(
         line("09:10", v5="20", b1="-100"),
     ]
     assert (await up._run(up.store.summary))["without_battery"] == 0
+
+
+async def test_import_keeps_recorded_energy_above_statistics(
+    hass: HomeAssistant,
+    tmp_path: Path,
+    now: FrozenDateTimeFactory,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    up = await make(hass, tmp_path, [field("v1", aggregate=AGG_ENERGY_TODAY)])
+    recorded = [local_ts(10, 10, 9, m) for m in (5, 10)]
+    await add(
+        up,
+        *(Sample(t, {"v1": 475.0}, DONE) for t in recorded),  # 950 Wh recorded
+        last_built=local_ts(10, 10, 10, 15),
+    )
+
+    async def from_states(hass_, sources, start, end):
+        return []
+
+    async def from_statistics(hass_, sources, start, end):
+        return [(local_ts(10, 10, 10, 0), {"v1": 900.0})]  # statistics say 900
+
+    with (
+        patch.object(uploader_module, "async_build_from_states", side_effect=from_states),
+        patch.object(
+            uploader_module, "async_build_from_statistics", side_effect=from_statistics
+        ),
+    ):
+        await up.async_import(
+            local_dt(10, 10, 9, 0), local_dt(10, 10, 10, 0), overwrite=False, upload=False
+        )
+
+    rows = await up._run(
+        up.store.samples_between, local_ts(10, 10, 9, 0) + 1, local_ts(10, 10, 10, 0) + 1
+    )
+    by_ts = {r.ts: r.values["v1"] for r in rows}
+    # Recorded readings are kept, the missing slots get 0: the hour holds 950.
+    assert [by_ts[t] for t in recorded] == [475.0, 475.0]
+    assert sum(by_ts.values()) == pytest.approx(950.0)
+    assert len(by_ts) == 12
+    assert "exceeds the long term statistics" in caplog.text
