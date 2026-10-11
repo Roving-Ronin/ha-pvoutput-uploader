@@ -398,11 +398,17 @@ class Uploader:
             await self._pause(err.reset, str(err))
             return
         except PVOutputBadRequest as err:
-            # E.g. "No status found": nothing recorded at PVOutput yet today.
-            # The last reading (e.g. yesterday's energy) no longer applies.
+            # Tried this interval either way: a rejected request is not retried
+            # every cycle, using up requests.
+            self._downloaded_at = now
+            if "no status" not in str(err).lower():
+                # Any other rejection is an error (shown in Last error); the
+                # reading is kept until it goes stale.
+                raise
+            # "No status found": nothing recorded at PVOutput yet today. The
+            # last reading (e.g. yesterday's energy) no longer applies.
             _LOGGER.debug("PVOutput has no status to download: %s", err)
             self.reading = self.reading_at = None
-            self._downloaded_at = now
             return
         self.reading = reading
         self.reading_at = self._downloaded_at = now

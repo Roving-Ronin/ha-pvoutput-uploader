@@ -1464,3 +1464,25 @@ async def test_download_goes_stale(
     await up._async_download()
     assert up.reading is None
     assert up.reading_at is None
+
+
+async def test_download_other_rejection_is_an_error(
+    hass: HomeAssistant, tmp_path: Path, now: FrozenDateTimeFactory
+) -> None:
+    up = await make(hass, tmp_path, [field("v2", entity=None, direction="download")])
+    up.client.reading = StatusReading("20261010", "10:15", {"v2": 800.0}, 0.1)
+    await up._async_download()
+
+    # Not "no status": an error, and the reading stays until it goes stale.
+    tries: list[str] = []
+    up.client.fail = lambda kind, _: tries.append(kind) or PVOutputBadRequest(
+        "Bad request 400: Invalid parameter"
+    )
+    now.tick(301)
+    with pytest.raises(PVOutputBadRequest):
+        await up._async_download()
+    assert up.fresh_reading is not None
+    # Not retried before the next interval.
+    now.tick(60)
+    await up._async_download()
+    assert tries == ["get_status"]

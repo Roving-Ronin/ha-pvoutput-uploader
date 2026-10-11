@@ -382,6 +382,9 @@ class DownloadSensor(PVOutputEntity, SensorEntity):
             attrs["pvoutput_status"] = f"{reading.date} {reading.time}"
         if uploader.reading_at is not None:
             attrs["downloaded_at"] = dt_util.utc_from_timestamp(uploader.reading_at).isoformat()
+        if FIELDS_BY_KEY[self.mapping.field].donor and not uploader.donor:
+            # v7-v12 are only returned to donors (getstatus ext=1).
+            attrs["not_downloaded_because"] = "needs a PVOutput donor account"
         return attrs
 
 

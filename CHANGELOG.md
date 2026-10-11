@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.1.7b3
+
+- **Only "No status found" clears the download reading.** Any other PVOutput rejection of getstatus is reported in Last error, keeps the reading until it goes stale, and is retried the next interval (not every cycle).
+- **v7-v12 download fields on a standard account** show why they stay unknown: `not_downloaded_because: needs a PVOutput donor account`.
+
 ## 0.1.7b2
 
 - **Download sensors no longer show a stale value as current.** After three upload intervals without a successful read (PVOutput or network down, rate limit) they turn unavailable; a new `downloaded_at` attribute shows when the value was read. When PVOutput has no status (e.g. a new day), the old reading is dropped, so yesterday's energy is not shown as today's.

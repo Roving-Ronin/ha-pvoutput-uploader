@@ -239,7 +239,8 @@ PVOutput does not have shows as unknown, not 0. If reads keep failing (PVOutput 
 network down, rate limit), the download sensors turn **unavailable** after three upload
 intervals rather than showing an old value as current; the `downloaded_at` attribute
 tells when the value was read, `pvoutput_status` which status it is. When PVOutput has no
-status yet (e.g. just after midnight) they show unknown.
+status yet (e.g. just after midnight) they show unknown; any other rejection by PVOutput
+shows in **Last error** and is retried the next interval.
 
 - **Per field, both ways kept.** Switching a field to Download keeps its sensor or fixed
   value and settings, so switching back to Send or Record only restores them. While it
@@ -249,7 +250,9 @@ status yet (e.g. just after midnight) they show unknown.
 - The selects and the Fields page check each choice against the field and account as
   they are when saving, so a stale page cannot set what is no longer allowed.
 - **Battery fields (b1-b6) cannot be downloaded:** PVOutput does not return them.
-  Extended fields (v7-v12) need a donor account.
+  Extended fields (v7-v12) need a donor account. If the account stops being a donor, a
+  v7-v12 download field stays configured but shows unknown, with the attribute
+  `not_downloaded_because: needs a PVOutput donor account`.
 - Download is the live value only; reading PVOutput history into statistics may come
   later.
 
