@@ -306,6 +306,26 @@ class PVOutputUploaderOptionsFlow(OptionsFlow):
 
     # Add
 
+    def _field_available(self, field: str) -> bool:
+        """Check a field against the options as saved now, not as first shown.
+
+        The forms list only free fields, but another Configure window (or a
+        stale form) may have added the same field in the meantime.
+        """
+        self._options = deepcopy(DEFAULT_OPTIONS) | deepcopy(dict(self.config_entry.options))
+        return field in self._free_fields()
+
+    def _add_field(self, new: dict[str, Any]) -> ConfigFlowResult:
+        """Save a new field, unless it was taken meanwhile."""
+        if not self._field_available(new[MAP_FIELD]):
+            return self.async_abort(
+                reason="field_unavailable",
+                description_placeholders={"field": new[MAP_FIELD]},
+            )
+        self._fields.append(new)
+        self._new = {}
+        return self._save()
+
     async def async_step_add_field(
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
@@ -322,8 +342,10 @@ class PVOutputUploaderOptionsFlow(OptionsFlow):
         if user_input is not None:
             field = user_input[MAP_FIELD]
             entity_id = user_input[MAP_ENTITY]
+            if not self._field_available(field):
+                errors[MAP_FIELD] = "field_unavailable"
             # Extended fields start as "average"; energy since midnight is checked later.
-            if (error := self._unit_error(field, entity_id, FIELDS_BY_KEY[field].default_aggregate)) == "unit_mismatch":
+            elif (error := self._unit_error(field, entity_id, FIELDS_BY_KEY[field].default_aggregate)) == "unit_mismatch":
                 errors["base"] = error
             else:
                 self._new = {MAP_FIELD: field, MAP_ENTITY: entity_id, MAP_CONSTANT: None}
@@ -354,17 +376,14 @@ class PVOutputUploaderOptionsFlow(OptionsFlow):
             if error := self._unit_error(field, self._new[MAP_ENTITY], aggregate, user_input.get(MAP_UNIT, "").strip() or None):
                 errors["base"] = error
             else:
-                self._fields.append(
-                    self._new
-                    | {
-                        MAP_NAME: user_input[MAP_NAME],
-                        MAP_ACTIVE: user_input[MAP_ACTIVE],
-                        MAP_AGGREGATE: aggregate,
-                    }
-                )
+                new = self._new | {
+                    MAP_NAME: user_input[MAP_NAME],
+                    MAP_ACTIVE: user_input[MAP_ACTIVE],
+                    MAP_AGGREGATE: aggregate,
+                }
                 if unit := user_input.get(MAP_UNIT, "").strip():
-                    self._fields[-1][MAP_UNIT] = unit
-                return self._save()
+                    new[MAP_UNIT] = unit
+                return self._add_field(new)
         defaults = user_input or {
             MAP_NAME: fdef.name,
             MAP_ACTIVE: True,
@@ -399,15 +418,16 @@ class PVOutputUploaderOptionsFlow(OptionsFlow):
             }
             if unit := user_input.get(MAP_UNIT, "").strip():
                 new[MAP_UNIT] = unit
-            if field == BATTERY_STATE:
+            if not self._field_available(field):
+                errors[MAP_FIELD] = "field_unavailable"
+            elif field == BATTERY_STATE:
                 # The state is picked from a list on the next screen.
                 self._new = new
                 return await self.async_step_battery_state()
-            if new[MAP_CONSTANT] is None:
+            elif new[MAP_CONSTANT] is None:
                 errors[MAP_CONSTANT] = "constant_required"
             else:
-                self._fields.append(new)
-                return self._save()
+                return self._add_field(new)
         schema = vol.Schema(
             {
                 vol.Required(MAP_FIELD): self._field_selector(
@@ -430,12 +450,10 @@ class PVOutputUploaderOptionsFlow(OptionsFlow):
     ) -> ConfigFlowResult:
         """Pick the fixed battery state (b6) from PVOutput's codes."""
         if user_input is not None:
-            self._fields.append(
+            return self._add_field(
                 self._new
                 | {MAP_CONSTANT: _constant_value(BATTERY_STATE, user_input[MAP_CONSTANT])}
             )
-            self._new = {}
-            return self._save()
         return self.async_show_form(
             step_id="battery_state",
             data_schema=vol.Schema(

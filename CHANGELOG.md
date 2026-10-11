@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.4
+
+- Adding a field checks again on submit, against the configuration as saved at that moment, that the PVOutput field is still free. A field added meanwhile in another Configure window (or from a stale form) is no longer added twice, and saving a new field no longer drops one another window saved. The field lists already showed only free fields.
+
 ## 0.1.3
 
 - **b1 (battery power) is mandatory for battery data**, as PVOutput ignores b2-b6 without it: **Add field** offers b2-b6 once b1 is configured, b1 cannot be removed while other battery fields remain, and without an active b1 the other battery fields are not sent. Their field sensors explain why.

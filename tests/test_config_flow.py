@@ -403,3 +403,71 @@ async def test_battery_state_is_picked_from_a_list(
         hass, result, {"constant": "4", "name": "Battery State", "active": True}
     )
     assert entry.options[CONF_FIELDS][-1]["constant"] == 4
+
+
+def _mapping(field: str, entity: str) -> dict[str, Any]:
+    return {
+        "field": field, "entity_id": entity, "constant": None,
+        "name": field, "active": True, "aggregate": "average",
+    }
+
+
+async def test_field_taken_in_another_window(
+    recorder_mock, hass: HomeAssistant, sensors
+) -> None:
+    entry = options_entry(hass)
+    result = await _add(hass, entry, "add_sensor")
+    assert "v5" in select_options(result, "field")
+
+    # Meanwhile another Configure window adds v5.
+    hass.config_entries.async_update_entry(
+        entry, options=dict(entry.options) | {CONF_FIELDS: [_mapping("v5", "sensor.outside")]}
+    )
+    result = await _configure(hass, result, {"entity_id": "sensor.outside", "field": "v5"})
+    assert result["errors"] == {"field": "field_unavailable"}
+    assert "v5" not in select_options(result, "field")
+    assert len(entry.options[CONF_FIELDS]) == 1
+
+    # Same for fixed values.
+    result = await _add(hass, entry, "add_constant")
+    hass.config_entries.async_update_entry(
+        entry,
+        options=dict(entry.options)
+        | {CONF_FIELDS: [*entry.options[CONF_FIELDS], _mapping("v6", "sensor.voltage")]},
+    )
+    result = await _configure(hass, result, {"field": "v6", "constant": 230, "active": True})
+    assert result["errors"] == {"field": "field_unavailable"}
+    assert [m["field"] for m in entry.options[CONF_FIELDS]] == ["v5", "v6"]
+
+
+async def test_field_taken_while_naming_it(
+    recorder_mock, hass: HomeAssistant, sensors
+) -> None:
+    entry = options_entry(hass)
+    result = await _add(hass, entry, "add_sensor")
+    result = await _configure(hass, result, {"entity_id": "sensor.outside", "field": "v5"})
+    assert result["step_id"] == "sensor_details"
+
+    hass.config_entries.async_update_entry(
+        entry, options=dict(entry.options) | {CONF_FIELDS: [_mapping("v5", "sensor.other")]}
+    )
+    result = await _configure(hass, result, {"name": "Outside", "active": True, "aggregate": "average"})
+    assert result["type"] is FlowResultType.ABORT
+    assert result["reason"] == "field_unavailable"
+    assert entry.options[CONF_FIELDS] == [_mapping("v5", "sensor.other")]
+
+
+async def test_adding_keeps_fields_added_elsewhere(
+    recorder_mock, hass: HomeAssistant, sensors
+) -> None:
+    entry = options_entry(hass)
+    result = await _add(hass, entry, "add_sensor")
+    result = await _configure(hass, result, {"entity_id": "sensor.outside", "field": "v5"})
+
+    # Another window saves v2 while this one is on the details screen.
+    hass.config_entries.async_update_entry(
+        entry, options=dict(entry.options) | {CONF_FIELDS: [_mapping("v2", "sensor.power")]}
+    )
+    result = await _configure(hass, result, {"name": "Outside", "active": True, "aggregate": "average"})
+    assert result["type"] is FlowResultType.CREATE_ENTRY
+    assert [m["field"] for m in entry.options[CONF_FIELDS]] == ["v2", "v5"]

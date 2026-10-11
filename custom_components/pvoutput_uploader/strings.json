@@ -179,6 +179,7 @@
     "error": {
       "unit_mismatch": "The sensor's unit does not fit this field.",
       "constant_required": "Enter the value to send.",
+      "field_unavailable": "This PVOutput field is already configured (or not available for this account). The list now shows only the fields still free.",
       "b1_required": "b1 (battery power) is mandatory while other battery fields (b2-b6) are configured: PVOutput ignores them without it. Remove them too, or keep b1.",
       "end_before_start": "The end must be after the start.",
       "nothing_unsent": "Everything recorded has been sent. Choose a date and time instead.",
@@ -186,6 +187,7 @@
       "unit_required": "This sensor has no unit. Enter its source unit before saving."
     },
     "abort": {
+      "field_unavailable": "{field} was added to this PV site in the meantime, so it was not added again. Open Configure to edit it.",
       "not_loaded": "The integration is not running. Check that it has started, then try again.",
       "reupload_queued": "Queued: {status_days} days as statuses, {output_days} days as daily totals. Progress shows in the Samples waiting and Daily outputs waiting sensors.",
       "import_done": "Imported {from_states} samples from recorded states and {from_statistics} from statistics."
