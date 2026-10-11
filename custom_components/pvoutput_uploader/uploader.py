@@ -944,7 +944,12 @@ class Uploader:
         return {"status_days": status_days, "output_days": len(output_days)}
 
     async def async_import(
-        self, start: datetime, end: datetime, overwrite: bool, upload: bool
+        self,
+        start: datetime,
+        end: datetime,
+        overwrite: bool,
+        upload: bool,
+        passive_fields: Iterable[str] = (),
     ) -> dict[str, int]:
         """Fill the log from recorder states, then long term statistics.
 
@@ -997,8 +1002,33 @@ class Uploader:
                         [Sample(ts, vals, state) for ts, vals in sorted(fill.items())],
                         resend=upload,
                     )
+            if upload:
+                # Like a reupload: the chosen passive fields are sent too, for
+                # the imported period only (the latest choice replaces any other).
+                if await self._set_passive_window(start_ts, end_ts, passive_fields):
+                    # Rows already sent need sending again to carry them, within
+                    # the period PVOutput still takes statuses for.
+                    window_day = _local(self.window_start(time.time())).date()
+                    lo = max(start_ts, self._day_bounds(window_day)[0])
+                    if lo <= end_ts:
+                        await self._run(self.store.mark_range, lo, end_ts + 1, PENDING)
             await self._refresh_summary()
         return {"from_states": from_states, "from_statistics": from_stats}
+
+    async def _set_passive_window(
+        self, start: int, end: int, passive_fields: Iterable[str]
+    ) -> bool:
+        """Send the given passive fields too for statuses in [start, end].
+
+        Returns whether any (still passive) field was chosen.
+        """
+        fields = sorted(set(passive_fields) & {m.field for m in self.passive_mappings})
+        await self._run(
+            self.store.set_meta,
+            META_PASSIVE_REUPLOAD,
+            json.dumps({"from": start, "to": end, "fields": fields}) if fields else None,
+        )
+        return bool(fields)
 
     async def _statistics_fill(
         self, hour_end: int, values: dict[str, float | None], aggregates: dict[str, str]

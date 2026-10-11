@@ -328,6 +328,14 @@ async def test_reupload_offers_passive_fields(
         result["flow_id"], {"next_step_id": "reupload"}
     )
     assert "passive_fields" in [str(k) for k in result["data_schema"].schema]
+
+    # The import form offers them too.
+    other = await hass.config_entries.options.async_init(entry.entry_id)
+    other = await hass.config_entries.options.async_configure(
+        other["flow_id"], {"next_step_id": "import_history"}
+    )
+    assert "passive_fields" in [str(k) for k in other["data_schema"].schema]
+
     uploader = entry.runtime_data.uploader
     today = dt_util.now().date().isoformat()
     with patch.object(

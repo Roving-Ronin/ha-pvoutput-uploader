@@ -276,6 +276,10 @@ win), the missing slots get 0, and a warning in the log names the hour.
 
 With *Send to PVOutput* on, the imported period is sent like any backlog; with it off it
 is only stored, ready for a later reupload.
+**Also send passive fields** (shown when the site has passive fields, all ticked by
+default): with *Send to PVOutput* on, the ticked passive fields are sent too, for the
+imported period only, like on **Reupload history**. Statuses PVOutput already has for
+that period are sent again to add them. In the action: `passive_fields: [v5]`.
 
 **Historical uploads in progress.** This example shows 4,935 stored history samples,
 with 4,657 still waiting to upload. The diagnostics show progress as the backlog is sent.

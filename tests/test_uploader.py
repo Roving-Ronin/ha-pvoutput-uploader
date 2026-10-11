@@ -1162,3 +1162,46 @@ async def test_import_keeps_recorded_energy_above_statistics(
     assert sum(by_ts.values()) == pytest.approx(950.0)
     assert len(by_ts) == 12
     assert "exceeds the long term statistics" in caplog.text
+
+
+async def test_import_sends_chosen_passive_fields(
+    hass: HomeAssistant, tmp_path: Path, now: FrozenDateTimeFactory
+) -> None:
+    up = await make(hass, tmp_path, [field("v2"), field("v5", active=False)])
+    # Already in the log and sent, but without the passive v5.
+    times = [local_ts(10, 9, 12, m) for m in (0, 5)]
+    await add(
+        up,
+        *(Sample(t, {"v2": 100.0, "v5": 20.0}, DONE) for t in times),
+        last_built=local_ts(10, 10, 10, 15),
+    )
+
+    async def nothing(*args):
+        return []
+
+    with (
+        patch.object(uploader_module, "async_build_from_states", side_effect=nothing),
+        patch.object(uploader_module, "async_build_from_statistics", side_effect=nothing),
+    ):
+        await up.async_import(
+            local_dt(10, 9, 12, 0), local_dt(10, 9, 12, 5),
+            overwrite=False, upload=True, passive_fields=["v5"],
+        )
+    await up._async_upload_statuses()
+    # Sent again, now with v5.
+    assert up.client.batches == [
+        [line("12:00", day="20261009", v2="100", v5="20"),
+         line("12:05", day="20261009", v2="100", v5="20")],
+    ]
+
+    # Without upload, the import leaves the choice and the queue alone.
+    with (
+        patch.object(uploader_module, "async_build_from_states", side_effect=nothing),
+        patch.object(uploader_module, "async_build_from_statistics", side_effect=nothing),
+    ):
+        await up.async_import(
+            local_dt(10, 9, 12, 0), local_dt(10, 9, 12, 5),
+            overwrite=False, upload=False, passive_fields=["v5"],
+        )
+    st = await states(up, 0, 2**40)
+    assert [st[t] for t in times] == [DONE, DONE]

@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.1.6b9
+
+- **Import history → Also send passive fields**, like on Reupload history: with Send to PVOutput on, the ticked passive fields (all by default; shown only when the site has passive fields) are sent too, for the imported period only. Statuses PVOutput already has for that period are sent again to add them. The `import_from_recorder` action takes `passive_fields`.
+- The import form's description now matches what it does: statistics fill whatever is still missing, and values already in the log are kept.
+
 ## 0.1.6b8
 
 - **Import: recorded energy above the statistics.** When the recorded 5 minute rows of an hour already hold more energy than the hourly statistics, the recorded values are kept, the missing slots get 0, and a warning in the log names the hour and both totals, instead of the hour silently not matching. README corrected.

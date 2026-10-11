@@ -55,6 +55,7 @@ IMPORT_SCHEMA = vol.Schema(
         vol.Optional(ATTR_END): cv.datetime,
         vol.Optional(ATTR_OVERWRITE, default=False): cv.boolean,
         vol.Optional(ATTR_UPLOAD, default=False): cv.boolean,
+        vol.Optional(ATTR_PASSIVE_FIELDS, default=list): vol.All(cv.ensure_list, [cv.string]),
     }
 )
 
@@ -131,7 +132,11 @@ def async_setup_services(hass: HomeAssistant) -> None:
             )
         coordinator = entry.runtime_data
         result = await coordinator.uploader.async_import(
-            start, end, call.data[ATTR_OVERWRITE], call.data[ATTR_UPLOAD]
+            start,
+            end,
+            call.data[ATTR_OVERWRITE],
+            call.data[ATTR_UPLOAD],
+            passive_fields=call.data[ATTR_PASSIVE_FIELDS],
         )
         await coordinator.async_request_refresh()
         return result

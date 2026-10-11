@@ -761,7 +761,11 @@ class PVOutputUploaderOptionsFlow(OptionsFlow):
                 errors["base"] = "end_before_start"
             else:
                 result = await uploader.async_import(
-                    start, end, user_input[ATTR_OVERWRITE], user_input[ATTR_UPLOAD]
+                    start,
+                    end,
+                    user_input[ATTR_OVERWRITE],
+                    user_input[ATTR_UPLOAD],
+                    passive_fields=user_input.get(ATTR_PASSIVE_FIELDS, []),
                 )
                 await self.config_entry.runtime_data.async_request_refresh()
                 return self.async_abort(
@@ -779,6 +783,22 @@ class PVOutputUploaderOptionsFlow(OptionsFlow):
                 vol.Required(ATTR_UPLOAD, default=False): BooleanSelector(),
             }
         )
+        passive = [m.field for m in uploader.passive_mappings]
+        if passive:
+            # Sent with the import (when Send to PVOutput is on), for its period only.
+            schema = schema.extend(
+                {
+                    vol.Optional(ATTR_PASSIVE_FIELDS, default=passive): SelectSelector(
+                        SelectSelectorConfig(
+                            options=self._field_options(
+                                [f.key for f in FIELD_CATALOG if f.key in passive]
+                            ),
+                            multiple=True,
+                            mode=SelectSelectorMode.LIST,
+                        )
+                    )
+                }
+            )
         defaults = user_input or {
             ATTR_START: (now - timedelta(days=7)).strftime("%Y-%m-%d 00:00:00"),
         }

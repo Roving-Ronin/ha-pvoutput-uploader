@@ -156,17 +156,19 @@
       },
       "import_history": {
         "title": "Import history from Home Assistant",
-        "description": "Fills the history log from Home Assistant's recorder: 5 minute detail where recorded states still exist (10 days by default), hourly statistics before that. Only sensor fields are imported.",
+        "description": "Fills the history log from Home Assistant's recorder: 5 minute detail where recorded states still exist (10 days by default), hourly long term statistics for whatever is still missing. Values already in the log are kept; missing slots and fields are filled. Only sensor fields are imported, active and passive.",
         "data": {
           "start": "From",
           "end": "To",
           "overwrite": "Replace recorded values",
-          "upload": "Send to PVOutput"
+          "upload": "Send to PVOutput",
+          "passive_fields": "Also send passive fields"
         },
         "data_description": {
           "end": "Defaults to now.",
-          "overwrite": "Off: periods already in the log are kept. On: they are rebuilt from recorded states.",
-          "upload": "Off: only stored in the log, ready for a later reupload. On: sent like any backlog (statuses within the PVOutput window)."
+          "overwrite": "Off: values already in the log are kept, only gaps are filled. On: periods are rebuilt from recorded states.",
+          "upload": "Off: only stored in the log, ready for a later reupload. On: sent like any backlog (statuses within the PVOutput window).",
+          "passive_fields": "With Send to PVOutput on, the ticked passive fields are sent too, for this period only (statuses PVOutput already has are sent again to add them); live statuses keep them off."
         }
       },
       "settings": {
@@ -362,6 +364,10 @@
         "upload": {
           "name": "Upload",
           "description": "Send the imported samples to PVOutput. Off keeps them in the log only."
+        },
+        "passive_fields": {
+          "name": "Passive fields",
+          "description": "With upload on, passive fields to send too, for this period only, e.g. v7 or b2."
         }
       }
     }
