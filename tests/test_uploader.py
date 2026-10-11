@@ -1486,3 +1486,27 @@ async def test_download_other_rejection_is_an_error(
     now.tick(60)
     await up._async_download()
     assert tries == ["get_status"]
+
+
+async def test_last_upload_and_download_survive_a_reload(
+    hass: HomeAssistant, tmp_path: Path, now: FrozenDateTimeFactory
+) -> None:
+    up = await make(
+        hass, tmp_path, [field("v2"), field("v5", entity=None, direction="download")]
+    )
+    await add(
+        up,
+        Sample(local_ts(10, 10, 10, 5), {"v2": 100.0}),
+        last_built=local_ts(10, 10, 10, 5),
+    )
+    await up._async_upload_statuses()
+    up.client.reading = StatusReading("20261010", "10:15", {"v5": 20.0}, None)
+    await up._async_download()
+    assert up.last_upload is not None
+    assert up.last_download is not None
+
+    # E.g. after a restart, or a field's select changed (the site reloads).
+    again = Uploader(hass, up.entry, FakeClient(), up.store)  # type: ignore[arg-type]
+    await again.async_load()
+    assert again.last_upload == up.last_upload
+    assert again.last_download == up.last_download

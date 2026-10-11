@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.1.7b4
+
+- **Last upload no longer resets to Unknown** after a restart or reload (e.g. changing a field's select): it is kept in the log database.
+- **Last download** diagnostic sensor, while any field downloads: when PVOutput was last read successfully. Also kept across restarts.
+- README: one **Field modes** section explaining sources, the three modes, which options the selects offer and why, and switching between upload and download.
+
 ## 0.1.7b3
 
 - **Only "No status found" clears the download reading.** Any other PVOutput rejection of getstatus is reported in Last error, keeps the reading until it goes stale, and is retried the next interval (not every cycle).

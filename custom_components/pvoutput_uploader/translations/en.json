@@ -292,6 +292,9 @@
       "last_upload": {
         "name": "Last upload"
       },
+      "last_download": {
+        "name": "Last download"
+      },
       "pending_samples": {
         "name": "Samples waiting"
       },

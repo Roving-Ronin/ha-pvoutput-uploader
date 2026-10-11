@@ -442,7 +442,7 @@ The PVOutput system's device page shows what is uploaded and as what:
   out battery fields" run. Current statuses keep going. Nothing is deleted: cleared
   statuses stay in the log as unsent (**Cleared samples**), and **Reupload history**,
   also *since the first unsent status*, sends them again.
-- Diagnostic sensors: last upload, samples waiting, daily outputs waiting, rejected
+- Diagnostic sensors: last upload (and last download while a field downloads; both kept across restarts and reloads), samples waiting, daily outputs waiting, rejected
   samples, partly sent samples, cleared samples, sent without battery, rejected daily
   outputs, history size and start, requests left this hour, rate limit pause, account
   type, last error.

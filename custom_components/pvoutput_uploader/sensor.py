@@ -153,11 +153,19 @@ async def async_setup_entry(
         DownloadSensor(coordinator, mapping) for mapping in uploader.download_mappings
     ]
     if downloads:
-        downloads.append(PVOutputSensor(coordinator, EFFICIENCY))
+        downloads += [
+            PVOutputSensor(coordinator, EFFICIENCY),
+            PVOutputSensor(coordinator, LAST_DOWNLOAD),
+        ]
     # Drop the sensors of removed fields, and download sensors no longer needed.
     wanted = {sensor.unique_id for sensor in (*fields, *downloads)}
     sid = entry.data[CONF_SYSTEM_ID]
-    managed = (f"{sid}_field_", f"{sid}_download_", f"{sid}_normalised_output")
+    managed = (
+        f"{sid}_field_",
+        f"{sid}_download_",
+        f"{sid}_normalised_output",
+        f"{sid}_last_download",
+    )
     registry = er.async_get(hass)
     for reg_entry in er.async_entries_for_config_entry(registry, entry.entry_id):
         if (
@@ -394,4 +402,11 @@ EFFICIENCY = PVOutputSensorDescription(
     state_class=SensorStateClass.MEASUREMENT,
     value_fn=lambda u: u.fresh_reading.efficiency if u.fresh_reading else None,
     available_fn=lambda u: u.reading_at is None or u.fresh_reading is not None,
+)
+
+LAST_DOWNLOAD = PVOutputSensorDescription(
+    key="last_download",
+    device_class=SensorDeviceClass.TIMESTAMP,
+    entity_category=EntityCategory.DIAGNOSTIC,
+    value_fn=lambda u: u.last_download,
 )

@@ -85,6 +85,8 @@ _T = TypeVar("_T")
 
 META_LAST_BUILT = "last_built"
 META_PAUSED_UNTIL = "paused_until"
+META_LAST_UPLOAD = "last_upload"
+META_LAST_DOWNLOAD = "last_download"
 META_LAST_PURGE = "last_purge"
 # Statuses up to this slot end are sent in batches without battery values.
 META_NO_BATTERY_UNTIL = "no_battery_until"
@@ -222,7 +224,9 @@ class Uploader:
         self.upload_enabled = True
         self.lock = asyncio.Lock()
         self.paused_until: float | None = None
+        # Kept in the log database, so a restart or reload does not reset them.
         self.last_upload: datetime | None = None
+        self.last_download: datetime | None = None
         self.last_error: str | None = None
         # Kept apart from upload errors: a working upload must not hide it.
         self.record_error: str | None = None
@@ -330,7 +334,15 @@ class Uploader:
         paused = await self._run(self.store.get_meta, META_PAUSED_UNTIL)
         if paused:
             self.paused_until = float(paused)
+        for key, attr in ((META_LAST_UPLOAD, "last_upload"), (META_LAST_DOWNLOAD, "last_download")):
+            if stored := await self._run(self.store.get_meta, key):
+                setattr(self, attr, dt_util.parse_datetime(stored))
         await self._refresh_summary()
+
+    async def _mark_uploaded(self) -> None:
+        """Note a request PVOutput accepted."""
+        self.last_upload = dt_util.utcnow()
+        await self._run(self.store.set_meta, META_LAST_UPLOAD, self.last_upload.isoformat())
 
     # Main cycle
 
@@ -412,6 +424,8 @@ class Uploader:
             return
         self.reading = reading
         self.reading_at = self._downloaded_at = now
+        self.last_download = dt_util.utc_from_timestamp(now)
+        await self._run(self.store.set_meta, META_LAST_DOWNLOAD, self.last_download.isoformat())
 
     @property
     def fresh_reading(self) -> StatusReading | None:
@@ -642,7 +656,7 @@ class Uploader:
                 else:
                     await self._unconfirmed(slot, "PVOutput did not add the status", deferred)
             if confirmed:
-                self.last_upload = dt_util.utcnow()
+                await self._mark_uploaded()
                 self.last_error = None
             self._batch_limit = min(self.batch_size, self._batch_limit * 2)
 
@@ -899,7 +913,7 @@ class Uploader:
             await self._run(
                 self.store.dequeue_outputs, [p["d"] for p in outputs]
             )
-            self.last_upload = dt_util.utcnow()
+            await self._mark_uploaded()
 
     async def _send_single_output(self, params: dict[str, str]) -> bool:
         """Send one daily output. Return whether to keep going this cycle."""
@@ -915,7 +929,7 @@ class Uploader:
             await self._reject_output(params["d"], str(err))
             return True
         await self._run(self.store.dequeue_outputs, [params["d"]])
-        self.last_upload = dt_util.utcnow()
+        await self._mark_uploaded()
         return True
 
     async def _reject_output(self, day: str, message: str) -> None:
