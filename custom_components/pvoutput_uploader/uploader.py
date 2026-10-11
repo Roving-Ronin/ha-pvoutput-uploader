@@ -1071,16 +1071,19 @@ class Uploader:
         """Return the passive fields the slot ending at ``slot`` also sends.
 
         A window applies when one of the slot's 5 minute rows (ending in
-        (slot - step, slot]) lies in it. Windows do not overlap; newest first
-        settles a slot whose rows fall in two windows.
+        (slot - step, slot]) lies in it. A status longer than 5 minutes can
+        hold rows of several windows (e.g. 15 minute statuses): it then sends
+        the passive fields of all of them, each aggregated over the whole
+        status like any other field. Windows themselves never overlap.
         """
         first_row = slot - step + LOG_INTERVAL
-        for w in reversed(windows):
+        fields: set[str] = set()
+        for w in windows:
             lo = max(w["from"], first_row)
             lo = -(-lo // LOG_INTERVAL) * LOG_INTERVAL  # first row at or after lo
             if lo <= min(w["to"], slot):
-                return w["fields"]
-        return []
+                fields.update(w["fields"])
+        return sorted(fields)
 
     async def _statistics_fill(
         self, hour_end: int, values: dict[str, float | None], aggregates: dict[str, str]

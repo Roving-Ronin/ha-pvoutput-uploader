@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.6b12
+
+- **Statuses longer than 5 minutes across two passive-field choices** (e.g. 15 minute statuses where a reupload or import starts or ends inside one) send the passive fields of every choice that holds one of their rows, each aggregated over the whole status like any other field. Before, only one choice applied. 5 minute statuses are unchanged.
+
 ## 0.1.6b11
 
 - **Passive-field windows no longer overlap.** A newer reupload or import is cut out of older windows (an older one around it keeps the parts before and after), so when the newer one finishes first its period cannot fall back to the older choice. A status uses a window only when one of its actual 5 minute rows lies in it.

@@ -1346,3 +1346,17 @@ async def test_clear_queue_clears_passive_choices(
     assert await up._passive_windows() != []
     await up.async_clear_queue()
     assert await up._passive_windows() == []
+
+
+async def test_long_status_sends_passive_fields_of_all_its_windows(
+    hass: HomeAssistant, tmp_path: Path, now: FrozenDateTimeFactory
+) -> None:
+    up = await make(hass, tmp_path, [field("v2")])
+    a = {"from": local_ts(10, 9, 10, 5), "to": local_ts(10, 9, 10, 10), "fields": ["v5"]}
+    b = {"from": local_ts(10, 9, 10, 15), "to": local_ts(10, 9, 10, 15), "fields": ["v6"]}
+    end = local_ts(10, 9, 10, 15)
+    # A 15 minute status ending 10:15 holds rows of both windows: both fields.
+    assert up._passive_for([a, b], end, 900) == ["v5", "v6"]
+    # A 5 minute status holds one row: one window.
+    assert up._passive_for([a, b], end, 300) == ["v6"]
+    assert up._passive_for([a, b], local_ts(10, 9, 10, 10), 300) == ["v5"]
