@@ -1,5 +1,24 @@
 # Changelog
 
+## 0.1.8
+
+Stable release of the 0.1.8 betas (b2, b3; b1 was not released): **PVOutput's history in Home Assistant statistics.**
+
+- **Every column PVOutput has** (v1-v12, normalised output) is kept as hourly statistics, *... (PVOutput history)* (`pvoutput_uploader:<system id>_<field>`), whatever the fields are set to: energy as hourly totals, the rest as hourly mean, min and max. Shown in statistics graphs and the Energy dashboard.
+- **Daily history download** switch (Controls, on by default): yesterday is added every day after 02:00, and the two days before it again for statuses that reached PVOutput late; up to 30 missed days are caught up after a stop. Each day fetched is checkpointed, so the hourly limit never causes repeats.
+- **Configure → Download history from PVOutput** (From, To): checks first how far back PVOutput has statuses and says so when the start has none, then fetches day by day in the background at the pace the hourly limit allows. Progress and result in the **History download days left** sensor; long downloads rebuild the statistics every 30 days and at the end.
+- **Newer data wins:** days PVOutput has statuses for replace what was downloaded before; days without keep it.
+- **Hours without statuses** (a gap, or midnight to the first status) share the energy counted over them evenly; the day's total stays exact. Daylight saving days (23 and 25 hours) are handled and tested.
+- **Download fields get their past:** a *from PVOutput* sensor's statistics are filled from the history for the hours before its own begin, never rewriting recorded hours, with energy totals lined up.
+- **Downloading** switch (while a field is in Download mode) stops the live reads.
+- **Removing a site** deletes its PVOutput history statistics.
+- **Icons:** matching Last upload / Last download, and icons for the new switches and sensors.
+- Normalised output from PVOutput is in kW/kW (was labelled kWh/kW); Home Assistant may ask once about the unit change of its statistics.
+
+**Upgrading from 0.1.7:** nothing to do. The daily history download starts by itself (switch it off under Controls if you do not want it); use **Download history from PVOutput** once to bring in the past.
+
+Details per beta below.
+
 ## 0.1.8b3
 
 - **Matching icons:** Last upload and Last download are a cloud with an up and a down arrow; the Downloading and Daily history download switches, History download days left and Normalised output have their own icons too.
