@@ -658,3 +658,21 @@ async def test_edit_download_field_gets_a_source(
     assert mapping["entity_id"] == "sensor.power"
     assert mapping["aggregate"] == "last"
     assert mapping["direction"] == "download"
+
+
+async def test_fields_refuse_a_stale_download_choice(
+    recorder_mock, hass: HomeAssistant
+) -> None:
+    entry = options_entry(hass, donor=True, fields=[_mapping("v7", "sensor.x")])
+    result = await _choose(hass, await _menu(hass, entry), "fields")
+    assert select_options(result, "v7") == ["send", "record_only", "download"]
+
+    # The account stops being a donor while the page is open.
+    hass.config_entries.async_update_entry(
+        entry, data=dict(entry.data) | {CONF_DETECTED_DONOR: False}
+    )
+    result = await _configure(hass, result, {"v7": "download"})
+    assert result["type"] is FlowResultType.FORM
+    assert result["errors"] == {"v7": "mode_not_allowed"}
+    assert select_options(result, "v7") == ["send", "record_only"]
+    assert _modes(entry) == {"v7": "send"}

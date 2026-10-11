@@ -235,11 +235,19 @@ A field set to **Download** is read from PVOutput instead of sent: its latest va
 It is read once per upload interval, whether or not **Uploading** is on, and uses one
 request from the hourly limit, keeping the same reserve as uploads. Energy fields (v1,
 v3) count Wh since local midnight, so they work in the Energy dashboard. A value
-PVOutput does not have shows as unknown, not 0.
+PVOutput does not have shows as unknown, not 0. If reads keep failing (PVOutput or the
+network down, rate limit), the download sensors turn **unavailable** after three upload
+intervals rather than showing an old value as current; the `downloaded_at` attribute
+tells when the value was read, `pvoutput_status` which status it is. When PVOutput has no
+status yet (e.g. just after midnight) they show unknown.
 
 - **Per field, both ways kept.** Switching a field to Download keeps its sensor or fixed
   value and settings, so switching back to Send or Record only restores them. While it
-  downloads, its sensor is still recorded in the log, so switching back leaves no gap.
+  downloads, **its Home Assistant sensor is still recorded in the log** (not what is
+  downloaded), so switching back leaves no gap; it is never sent while downloading.
+  Remove the field and add it from PVOutput instead to stop recording it.
+- The selects and the Fields page check each choice against the field and account as
+  they are when saving, so a stale page cannot set what is no longer allowed.
 - **Battery fields (b1-b6) cannot be downloaded:** PVOutput does not return them.
   Extended fields (v7-v12) need a donor account.
 - Download is the live value only; reading PVOutput history into statistics may come

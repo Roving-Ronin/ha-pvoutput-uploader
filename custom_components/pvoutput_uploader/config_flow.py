@@ -597,6 +597,7 @@ class PVOutputUploaderOptionsFlow(OptionsFlow):
         Choosing Send or Record only for a field with no source in Home
         Assistant (added as download only) asks for one next.
         """
+        errors: dict[str, str] = {}
         if user_input is not None:
             # Only the choices changed on this page are applied, to the
             # configuration as saved now: a field changed elsewhere meanwhile keeps
@@ -608,31 +609,30 @@ class PVOutputUploaderOptionsFlow(OptionsFlow):
             }
             self._options = deepcopy(DEFAULT_OPTIONS) | deepcopy(dict(self.config_entry.options))
             self._needs_source = []
+            # Checked again against the account and fields as saved now: the
+            # page may be stale (e.g. donor status changed meanwhile).
             for mapping in self._fields:
                 mode = changed.get(mapping[MAP_FIELD])
-                if mode is None:
-                    continue
-                if mode != MODE_DOWNLOAD and not _has_source(mapping):
-                    self._needs_source.append((mapping[MAP_FIELD], mode))
-                else:
-                    apply_mode(mapping, mode)
-            if self._needs_source:
-                return await self.async_step_field_source()
-            return self._save()
+                if mode is not None and mode not in self._modes_for(mapping):
+                    errors[mapping[MAP_FIELD]] = "mode_not_allowed"
+            if not errors:
+                for mapping in self._fields:
+                    mode = changed.get(mapping[MAP_FIELD])
+                    if mode is None:
+                        continue
+                    if mode != MODE_DOWNLOAD and not _has_source(mapping):
+                        self._needs_source.append((mapping[MAP_FIELD], mode))
+                    else:
+                        apply_mode(mapping, mode)
+                if self._needs_source:
+                    return await self.async_step_field_source()
+                return self._save()
         order = {key: n for n, key in enumerate(FIELD_KEYS)}
         fields = sorted(self._fields, key=lambda m: order[m[MAP_FIELD]])
         self._shown_modes = {m[MAP_FIELD]: _mode(m) for m in fields}
-        donor = self._donor()
         schema: dict[Any, Any] = {}
         for m in fields:
-            modes = [MODE_SEND, MODE_RECORD]
-            fdef = FIELDS_BY_KEY[m[MAP_FIELD]]
-            # v7-v12 are downloaded for donors only; a field already set to
-            # Download keeps the option so the page can show it.
-            if downloadable(fdef.key) and (
-                donor or not fdef.donor or _mode(m) == MODE_DOWNLOAD
-            ):
-                modes.append(MODE_DOWNLOAD)
+            modes = self._modes_for(m)
             schema[vol.Required(m[MAP_FIELD], default=_mode(m))] = SelectSelector(
                 SelectSelectorConfig(
                     options=modes,
@@ -644,7 +644,23 @@ class PVOutputUploaderOptionsFlow(OptionsFlow):
             step_id="fields",
             data_schema=vol.Schema(schema),
             description_placeholders={"fields": self._describe()},
+            errors=errors,
         )
+
+    def _modes_for(self, mapping: dict[str, Any]) -> list[str]:
+        """Return the modes a field may be set to on the Fields page.
+
+        Send and Record only always (a field without a source gets one next);
+        Download for fields PVOutput returns, v7-v12 for donors only. A field
+        already set to Download keeps the option, so the page can show it.
+        """
+        modes = [MODE_SEND, MODE_RECORD]
+        fdef = FIELDS_BY_KEY[mapping[MAP_FIELD]]
+        if downloadable(fdef.key) and (
+            self._donor() or not fdef.donor or _mode(mapping) == MODE_DOWNLOAD
+        ):
+            modes.append(MODE_DOWNLOAD)
+        return modes
 
     async def async_step_field_source(
         self, user_input: dict[str, Any] | None = None

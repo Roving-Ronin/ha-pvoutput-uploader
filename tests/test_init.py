@@ -459,3 +459,32 @@ async def test_field_mode_selects(
         assert hass.states.get("sensor.my_system_v5_ambient_from_pvoutput") is None
 
     assert await hass.config_entries.async_unload(entry.entry_id)
+
+
+async def test_field_mode_select_checks_the_saved_field(
+    recorder_mock, hass: HomeAssistant, entry: MockConfigEntry
+) -> None:
+    fields = [
+        {
+            "field": "v2", "entity_id": None, "constant": None, "name": "Power",
+            "active": True, "aggregate": "average", "direction": "download",
+        },
+    ]
+    hass.config_entries.async_update_entry(
+        entry, options=dict(entry.options) | {"fields": fields}
+    )
+    reading = StatusReading("20261011", "12:00", {"v2": 1500.0}, 0.25)
+    with (
+        patch(GET_SYSTEM, AsyncMock(return_value=SystemInfo("My System", 5, False))),
+        patch(GET_STATUS, AsyncMock(return_value=reading)),
+    ):
+        await _setup(hass, entry)
+        select = hass.data["entity_components"]["select"].get_entity(
+            "select.my_system_v2_power"
+        )
+        # Without a source, Send is refused even when called directly.
+        with pytest.raises(ServiceValidationError):
+            await select.async_select_option("send")
+        assert _modes(entry) == {"v2": "download"}
+
+    assert await hass.config_entries.async_unload(entry.entry_id)

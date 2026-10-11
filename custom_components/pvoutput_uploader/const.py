@@ -149,6 +149,9 @@ MAX_REQUESTS_PER_CYCLE: Final = 10
 # Requests kept in hand from the hourly limit. The limit belongs to the API key,
 # so this leaves room for other uploaders using the same key (e.g. IoTaWatt).
 RATE_RESERVE: Final = 5
+# Download sensors turn unavailable after this many upload intervals without a
+# successful read.
+DOWNLOAD_STALE_INTERVALS: Final = 3
 # The statuses of the last this many upload intervals are current: sent first,
 # before any backlog.
 CURRENT_SLOTS: Final = 2

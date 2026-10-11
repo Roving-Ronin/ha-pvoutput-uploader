@@ -7,12 +7,14 @@ from copy import deepcopy
 from homeassistant.components.select import SelectEntity
 from homeassistant.const import EntityCategory
 from homeassistant.core import HomeAssistant
+from homeassistant.exceptions import ServiceValidationError
 from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 
 from .const import (
     CONF_FIELDS,
     CONF_SYSTEM_ID,
+    DOMAIN,
     FIELDS_BY_KEY,
     MAP_FIELD,
     MODE_DOWNLOAD,
@@ -110,7 +112,21 @@ class FieldModeSelect(PVOutputEntity, SelectEntity):
         entry = self.coordinator.config_entry
         options = deepcopy(dict(entry.options))
         for field in options.get(CONF_FIELDS, []):
-            if field[MAP_FIELD] == self.mapping.field:
-                apply_mode(field, option)
+            if field[MAP_FIELD] != self.mapping.field:
+                continue
+            # Checked against the field as saved now and the current account,
+            # not only the options listed when the select was created.
+            allowed = field_modes(FieldMapping.from_dict(field), self.coordinator.uploader.donor)
+            if option not in allowed:
+                raise ServiceValidationError(
+                    translation_domain=DOMAIN,
+                    translation_key="mode_not_allowed",
+                    translation_placeholders={
+                        "field": self.mapping.field,
+                        "mode": option,
+                        "allowed": ", ".join(allowed),
+                    },
+                )
+            apply_mode(field, option)
         # Saving reloads the site, which recreates this select with the new mode.
         self.hass.config_entries.async_update_entry(entry, options=options)

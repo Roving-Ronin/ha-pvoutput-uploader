@@ -33,6 +33,7 @@ from .builder import (
 from .const import (
     DIRECTION_DOWNLOAD,
     DIRECTION_UPLOAD,
+    DOWNLOAD_STALE_INTERVALS,
     MAP_DIRECTION,
     MODE_DOWNLOAD,
     MODE_RECORD,
@@ -210,6 +211,9 @@ class Uploader:
         self.store = store
         options = entry.options
         self.mappings = [FieldMapping.from_dict(m) for m in options.get(CONF_FIELDS, [])]
+        # A field set to Download keeps its sensor, and it is still recorded:
+        # switching back to Send or Record only then leaves no gap in the log.
+        # It is never sent while downloading (see _sendable).
         self.sources = [
             Source(m.field, m.entity_id, m.aggregate, m.unit)
             for m in self.mappings
@@ -222,8 +226,10 @@ class Uploader:
         self.last_error: str | None = None
         # Kept apart from upload errors: a working upload must not hide it.
         self.record_error: str | None = None
-        # The latest status read from PVOutput for download fields, and when.
+        # The latest status read from PVOutput for download fields, when it was
+        # read, and when a read was last tried.
         self.reading: StatusReading | None = None
+        self.reading_at: float | None = None
         self._downloaded_at: float | None = None
         self.summary: dict[str, Any] = {}
         # Field key -> (timestamp, value) of its latest recorded value.
@@ -378,7 +384,7 @@ class Uploader:
     async def _async_download(self) -> None:
         """Read the latest status for download fields, once per status interval."""
         if not self.download_mappings:
-            self.reading = None
+            self.reading = self.reading_at = None
             return
         now = time.time()
         if self._downloaded_at is not None and now - self._downloaded_at < self.upload_interval:
@@ -393,11 +399,27 @@ class Uploader:
             return
         except PVOutputBadRequest as err:
             # E.g. "No status found": nothing recorded at PVOutput yet today.
+            # The last reading (e.g. yesterday's energy) no longer applies.
             _LOGGER.debug("PVOutput has no status to download: %s", err)
+            self.reading = self.reading_at = None
             self._downloaded_at = now
             return
         self.reading = reading
-        self._downloaded_at = now
+        self.reading_at = self._downloaded_at = now
+
+    @property
+    def fresh_reading(self) -> StatusReading | None:
+        """Return the last reading, unless reads have failed for too long.
+
+        After DOWNLOAD_STALE_INTERVALS upload intervals without a successful
+        read (PVOutput or the network down, rate limit), the download sensors
+        turn unavailable instead of showing an old value as current.
+        """
+        if self.reading_at is None or (
+            time.time() - self.reading_at > DOWNLOAD_STALE_INTERVALS * self.upload_interval
+        ):
+            return None
+        return self.reading
 
     # Rate limit
 

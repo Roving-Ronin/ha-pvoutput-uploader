@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.1.7b2
+
+- **Download sensors no longer show a stale value as current.** After three upload intervals without a successful read (PVOutput or network down, rate limit) they turn unavailable; a new `downloaded_at` attribute shows when the value was read. When PVOutput has no status (e.g. a new day), the old reading is dropped, so yesterday's energy is not shown as today's.
+- **Mode changes are checked when saved:** the field selects and Configure → Fields check the choice against the field and account as saved now (e.g. Send without a source, or Download of v7-v12 after the account stopped being a donor) instead of trusting the options shown.
+- Documented that a downloading field's Home Assistant sensor keeps being recorded (never sent), so switching back leaves no gap.
+
 ## 0.1.7b1
 
 First stage of download: fields can be read from PVOutput as well as sent.

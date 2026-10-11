@@ -240,7 +240,8 @@
       "nothing_unsent": "Everything recorded has been sent. Choose a date and time instead.",
       "start_required": "Enter the date and time to start from.",
       "unit_required": "This sensor has no unit. Enter its source unit before saving.",
-      "entity_or_constant": "Pick either a sensor or a fixed value (one of them)."
+      "entity_or_constant": "Pick either a sensor or a fixed value (one of them).",
+      "mode_not_allowed": "Not available for this field any more (e.g. the account is no longer a donor, which v7-v12 need to download). The page now shows what is."
     },
     "abort": {
       "no_free_fields": "Every PVOutput field this PV site can send is already configured. Edit or remove a field to change what is sent; extended and battery fields need a donor account.",
@@ -367,6 +368,9 @@
     },
     "start_required": {
       "message": "Give a start, or set since_failure."
+    },
+    "mode_not_allowed": {
+      "message": "{field} cannot be set to {mode}. Allowed now: {allowed}. A field added from PVOutput needs a sensor or fixed value (Configure) before Send or Record only; downloading v7-v12 needs a donor account."
     }
   },
   "services": {

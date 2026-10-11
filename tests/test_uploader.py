@@ -1438,3 +1438,29 @@ async def test_download_extended_for_donors_and_errors(
     up.mappings = []
     await up._async_download()
     assert up.reading is None
+
+
+async def test_download_goes_stale(
+    hass: HomeAssistant, tmp_path: Path, now: FrozenDateTimeFactory
+) -> None:
+    up = await make(hass, tmp_path, [field("v2", entity=None, direction="download")])
+    up.client.reading = StatusReading("20261010", "10:15", {"v2": 800.0}, 0.1)
+    await up._async_download()
+    assert up.fresh_reading == up.client.reading
+
+    # Reads fail: the last value counts for three upload intervals, then not.
+    up.client.fail = lambda kind, _: PVOutputRateLimited("exceeded", time.time() + 3600)
+    now.tick(600)
+    await up._async_download()
+    assert up.fresh_reading is not None
+    now.tick(301)
+    assert up.fresh_reading is None
+    # Kept, for the attributes and for when reads work again.
+    assert up.reading is not None
+
+    # PVOutput has no status (e.g. a new day): the old reading no longer applies.
+    up.client.fail = lambda kind, _: PVOutputBadRequest("No status found")
+    up.paused_until = None
+    await up._async_download()
+    assert up.reading is None
+    assert up.reading_at is None

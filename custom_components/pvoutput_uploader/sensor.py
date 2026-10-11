@@ -51,6 +51,7 @@ class PVOutputSensorDescription(SensorEntityDescription):
     """Describes a status sensor."""
 
     value_fn: Callable[[Uploader], Any]
+    available_fn: Callable[[Uploader], bool] = lambda _: True
 
 
 SENSORS = (
@@ -186,8 +187,11 @@ class PVOutputSensor(PVOutputEntity, SensorEntity):
 
     @property
     def available(self) -> bool:
-        """The uploader keeps its own state, so the sensors stay available."""
-        return True
+        """The uploader keeps its own state, so the sensors stay available.
+
+        Normalised output is the exception: unavailable while stale.
+        """
+        return self.entity_description.available_fn(self.coordinator.uploader)
 
     @property
     def native_value(self) -> Any:
@@ -356,21 +360,28 @@ class DownloadSensor(PVOutputEntity, SensorEntity):
 
     @property
     def available(self) -> bool:
-        """Unknown rather than unavailable while PVOutput has no value."""
-        return True
+        """Unavailable once reads have failed for a while (stale value).
+
+        A value PVOutput does not have shows as unknown instead.
+        """
+        uploader = self.coordinator.uploader
+        return uploader.reading_at is None or uploader.fresh_reading is not None
 
     @property
     def native_value(self) -> float | None:
         """Return the value PVOutput holds."""
-        reading = self.coordinator.uploader.reading
+        reading = self.coordinator.uploader.fresh_reading
         return reading.values.get(self.mapping.field) if reading else None
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
         """Tell which PVOutput field and status the value comes from."""
         attrs: dict[str, Any] = {"pvoutput_field": self.mapping.field}
-        if (reading := self.coordinator.uploader.reading) is not None:
+        uploader = self.coordinator.uploader
+        if (reading := uploader.reading) is not None:
             attrs["pvoutput_status"] = f"{reading.date} {reading.time}"
+        if uploader.reading_at is not None:
+            attrs["downloaded_at"] = dt_util.utc_from_timestamp(uploader.reading_at).isoformat()
         return attrs
 
 
@@ -378,5 +389,6 @@ EFFICIENCY = PVOutputSensorDescription(
     key="normalised_output",
     native_unit_of_measurement="kWh/kW",
     state_class=SensorStateClass.MEASUREMENT,
-    value_fn=lambda u: u.reading.efficiency if u.reading else None,
+    value_fn=lambda u: u.fresh_reading.efficiency if u.fresh_reading else None,
+    available_fn=lambda u: u.reading_at is None or u.fresh_reading is not None,
 )
