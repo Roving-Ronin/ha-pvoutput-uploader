@@ -2,6 +2,7 @@
 
 ## 0.1.8b3
 
+- **Matching icons:** Last upload and Last download are a cloud with an up and a down arrow; the Downloading and Daily history download switches, History download days left and Normalised output have their own icons too.
 - **Daily history download checkpoints each day it fetches**, so a pass stopped by the hourly limit does not ask for the same days again, and the two previous days are fetched again only once, when a new day arrives.
 - Tests for daylight saving days (Sydney: the 23 hour day in October, the 25 hour day in April): every hour lies in its day, none twice, and energy adds up to PVOutput's day total.
 

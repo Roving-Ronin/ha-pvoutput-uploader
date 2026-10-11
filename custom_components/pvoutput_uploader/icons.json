@@ -1,7 +1,10 @@
 {
   "entity": {
     "sensor": {
-      "last_upload": { "default": "mdi:cloud-check-outline" },
+      "last_upload": { "default": "mdi:cloud-upload-outline" },
+      "last_download": { "default": "mdi:cloud-download-outline" },
+      "history_download": { "default": "mdi:database-arrow-down-outline" },
+      "normalised_output": { "default": "mdi:solar-power-variant-outline" },
       "pending_samples": { "default": "mdi:tray-full" },
       "queued_outputs": { "default": "mdi:calendar-clock" },
       "failed_samples": { "default": "mdi:alert-circle-outline" },
@@ -23,6 +26,14 @@
       "uploading": {
         "default": "mdi:cloud-upload",
         "state": { "off": "mdi:cloud-off-outline" }
+      },
+      "downloading": {
+        "default": "mdi:cloud-download",
+        "state": { "off": "mdi:cloud-off-outline" }
+      },
+      "daily_history": {
+        "default": "mdi:database-arrow-down",
+        "state": { "off": "mdi:database-off-outline" }
       }
     }
   },
