@@ -8,6 +8,10 @@ reupload:
       default: false
       selector:
         boolean:
+    without_battery:
+      default: false
+      selector:
+        boolean:
     start:
       selector:
         datetime:

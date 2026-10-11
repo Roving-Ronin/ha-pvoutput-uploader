@@ -78,6 +78,7 @@ from .services import (
     ATTR_OVERWRITE,
     ATTR_START,
     ATTR_UPLOAD,
+    ATTR_WITHOUT_BATTERY,
 )
 from .uploader import REUPLOAD_AUTO, REUPLOAD_OUTPUTS, REUPLOAD_STATUSES, Uploader
 
@@ -619,7 +620,12 @@ class PVOutputUploaderOptionsFlow(OptionsFlow):
             if start is not None and end < start.date():
                 errors["base"] = "end_before_start"
             if start is not None and not errors:
-                result = await uploader.async_reupload(start, end, user_input[ATTR_METHOD])
+                result = await uploader.async_reupload(
+                    start,
+                    end,
+                    user_input[ATTR_METHOD],
+                    without_battery=user_input.get(ATTR_WITHOUT_BATTERY, False),
+                )
                 await self.config_entry.runtime_data.async_request_refresh()
                 return self.async_abort(
                     reason="reupload_queued",
@@ -647,6 +653,11 @@ class PVOutputUploaderOptionsFlow(OptionsFlow):
                 ),
             }
         )
+        if uploader.sends_battery:
+            # Only then is there a choice: battery values need one request each.
+            schema = schema.extend(
+                {vol.Required(ATTR_WITHOUT_BATTERY, default=False): BooleanSelector()}
+            )
         defaults = user_input or {
             ATTR_FROM: FROM_FAILURE if first_unsent is not None else FROM_TIME,
             ATTR_START: (today - timedelta(days=1)).strftime("%Y-%m-%d 00:00:00"),

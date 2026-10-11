@@ -29,6 +29,7 @@ ATTR_METHOD = "method"
 ATTR_OVERWRITE = "overwrite"
 ATTR_UPLOAD = "upload"
 ATTR_SINCE_FAILURE = "since_failure"
+ATTR_WITHOUT_BATTERY = "without_battery"
 
 SERVICE_REUPLOAD = "reupload"
 SERVICE_IMPORT = "import_from_recorder"
@@ -38,6 +39,7 @@ REUPLOAD_SCHEMA = vol.Schema(
         vol.Optional(ATTR_CONFIG_ENTRY_ID): cv.string,
         vol.Optional(ATTR_START): vol.Any(cv.date, cv.datetime),
         vol.Optional(ATTR_SINCE_FAILURE, default=False): cv.boolean,
+        vol.Optional(ATTR_WITHOUT_BATTERY, default=False): cv.boolean,
         vol.Optional(ATTR_END): cv.date,
         vol.Optional(ATTR_METHOD, default=REUPLOAD_AUTO): vol.In(
             [REUPLOAD_AUTO, REUPLOAD_STATUSES, REUPLOAD_OUTPUTS]
@@ -104,7 +106,9 @@ def async_setup_services(hass: HomeAssistant) -> None:
             raise ServiceValidationError(
                 translation_domain=DOMAIN, translation_key="end_before_start"
             )
-        result = await uploader.async_reupload(start, end, call.data[ATTR_METHOD])
+        result = await uploader.async_reupload(
+            start, end, call.data[ATTR_METHOD], without_battery=call.data[ATTR_WITHOUT_BATTERY]
+        )
         await coordinator.async_request_refresh()
         return result
 

@@ -235,6 +235,15 @@ statuses, and when the first unsent one is. Start:
 - *Daily totals only*: daily outputs (generation, consumption, peak power, min/max
   temperature); these replace the day's totals in PVOutput
 
+**Leave out battery fields (much faster).** Shown only when battery fields (b1-b6) are
+sent. Battery values cannot go in PVOutput's batch upload, so each status then needs its
+own request, and at about 300 requests an hour three weeks of 5 minute statuses take
+around 20 hours. With this ticked, everything waiting up to the moment you submit is
+sent in batches of 100 without battery values, in minutes; statuses holding only battery
+values are skipped. New statuses keep their battery values. Reupload the same period
+again without the tick to add the battery values later (`without_battery: true` in the
+action).
+
 Sending runs in the background at the pace the hourly request limit allows (60 requests
 an hour, 300 for donors). The **Samples waiting** and **Daily outputs waiting** sensors
 show the progress.

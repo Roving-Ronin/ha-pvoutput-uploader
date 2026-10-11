@@ -77,6 +77,8 @@ _T = TypeVar("_T")
 META_LAST_BUILT = "last_built"
 META_PAUSED_UNTIL = "paused_until"
 META_LAST_PURGE = "last_purge"
+# Statuses up to this slot end are sent in batches without battery values.
+META_NO_BATTERY_UNTIL = "no_battery_until"
 
 REUPLOAD_AUTO = "auto"
 REUPLOAD_STATUSES = "statuses"
@@ -385,8 +387,12 @@ class Uploader:
         if not stored:
             return
         last_built = int(stored)
-        single = any(FIELDS_BY_KEY[m.field].battery for m in active)
+        battery = any(FIELDS_BY_KEY[m.field].battery for m in active)
         per_slot = step // LOG_INTERVAL
+        # Statuses up to this slot are sent in batches without battery values,
+        # as asked by a reupload (much faster than one request per status).
+        stored_until = await self._run(self.store.get_meta, META_NO_BATTERY_UNTIL)
+        no_battery_until = int(stored_until) if stored_until and battery else None
 
         # Statuses PVOutput did not confirm are retried next cycle, not straight away.
         deferred: set[int] = set()
@@ -394,6 +400,16 @@ class Uploader:
         for _ in range(MAX_REQUESTS_PER_CYCLE):
             if not self._rate_ok():
                 return
+            without_battery = False
+            if no_battery_until is not None:
+                first = await self._run(self.store.first_pending, window, last_built)
+                if first is not None and _slot_end(first, step) <= no_battery_until:
+                    without_battery = True
+                else:
+                    # The batch backlog is done; back to the normal way.
+                    no_battery_until = None
+                    await self._run(self.store.set_meta, META_NO_BATTERY_UNTIL, None)
+            single = battery and not without_battery
             limit = 1 if single else self._batch_limit
             pending = await self._run(
                 self.store.pending_ts,
@@ -404,7 +420,7 @@ class Uploader:
             slots: list[int] = []
             for ts in pending:
                 slot = _slot_end(ts, step)
-                if slot > last_built:
+                if slot > last_built or (without_battery and slot > no_battery_until):
                     break
                 if slot not in deferred and (not slots or slots[-1] != slot):
                     slots.append(slot)
@@ -423,9 +439,12 @@ class Uploader:
                 day_start, _ = self._day_bounds(_local(slot).date())
                 day_rows = [r for r in rows if r.ts >= day_start]
                 values = self._slot_values(slot, rows, day_rows)
+                if without_battery:
+                    values = self._without_battery(values)
                 if values:
                     entries.append((slot, values))
                 else:
+                    # Nothing to send (in a batch without battery: battery only).
                     await self._mark_slot(slot, DONE)
             if not entries:
                 continue
@@ -488,6 +507,21 @@ class Uploader:
             for slot in slots
             if (_local(slot).strftime("%Y%m%d"), _local(slot).strftime("%H:%M")) in added
         }
+
+    def _without_battery(self, values: dict[str, str]) -> dict[str, str]:
+        """Drop battery values; nothing is left if only they were measured."""
+        rest = {k: v for k, v in values.items() if not FIELDS_BY_KEY[k].battery}
+        sensors = {
+            m.field
+            for m in self.active_mappings
+            if m.entity_id and not FIELDS_BY_KEY[m.field].battery
+        }
+        return rest if sensors & rest.keys() else {}
+
+    @property
+    def sends_battery(self) -> bool:
+        """Return whether battery fields are sent (one request per status)."""
+        return any(FIELDS_BY_KEY[m.field].battery for m in self.active_mappings)
 
     def _batch_line(self, slot: int, values: dict[str, str]) -> str:
         local = _local(slot)
@@ -723,10 +757,20 @@ class Uploader:
         return await self._run(self.store.first_unsent)
 
     async def async_reupload(
-        self, start: datetime, end: date, method: str
+        self, start: datetime, end: date, method: str, without_battery: bool = False
     ) -> dict[str, int]:
-        """Queue history from ``start`` to the end of day ``end`` for sending again."""
+        """Queue history from ``start`` to the end of day ``end`` for sending again.
+
+        With ``without_battery``, everything waiting up to now is sent in batches
+        without battery values (100 statuses per request instead of one); newer
+        statuses keep them. Reuploading the period normally adds them later.
+        """
         async with self.lock:
+            await self._run(
+                self.store.set_meta,
+                META_NO_BATTERY_UNTIL,
+                str(int(time.time())) if without_battery and self.sends_battery else None,
+            )
             now = time.time()
             today = dt_util.now().date()
             end = min(end, today)

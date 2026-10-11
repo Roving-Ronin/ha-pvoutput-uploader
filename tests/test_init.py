@@ -191,6 +191,8 @@ async def test_history_from_the_menu(
         result["flow_id"], {"next_step_id": "reupload"}
     )
     assert result["step_id"] == "reupload"
+    # No battery fields: no "leave out battery" box.
+    assert "without_battery" not in [str(k) for k in result["data_schema"].schema]
     placeholders = result["description_placeholders"]
     assert placeholders["status_days"] == "14"
     assert placeholders["first_unsent"].startswith("none")
@@ -279,5 +281,45 @@ async def test_field_sensors(recorder_mock, hass: HomeAssistant, entry: MockConf
         await hass.async_block_till_done(wait_background_tasks=True)
     assert hass.states.get("sensor.my_system_b3_battery_size") is None
     assert hass.states.get("sensor.my_system_v5_ambient") is not None
+
+    assert await hass.config_entries.async_unload(entry.entry_id)
+
+
+async def test_reupload_offers_without_battery_only_with_battery(
+    recorder_mock, hass: HomeAssistant, entry: MockConfigEntry
+) -> None:
+    b1 = {
+        "field": "b1", "entity_id": "sensor.battery_power", "constant": None,
+        "name": "Battery Power", "active": True, "aggregate": "average",
+    }
+    hass.config_entries.async_update_entry(
+        entry, options=dict(entry.options) | {"fields": [b1]}
+    )
+    with patch(GET_SYSTEM, AsyncMock(return_value=SystemInfo("My System", 5, True))):
+        await _setup(hass, entry)
+
+    result = await hass.config_entries.options.async_init(entry.entry_id)
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"], {"next_step_id": "reupload"}
+    )
+    assert "without_battery" in [str(k) for k in result["data_schema"].schema]
+    uploader = entry.runtime_data.uploader
+    with patch.object(
+        uploader,
+        "async_reupload",
+        AsyncMock(return_value={"status_days": 1, "output_days": 0}),
+    ) as reupload:
+        result = await hass.config_entries.options.async_configure(
+        result["flow_id"],
+        {
+            "from": "from_time",
+            "start": f"{dt_util.now().date().isoformat()} 00:00:00",
+            "end": dt_util.now().date().isoformat(),
+            "method": "statuses",
+            "without_battery": True,
+        },
+        )
+    assert result["reason"] == "reupload_queued"
+    assert reupload.call_args.kwargs == {"without_battery": True}
 
     assert await hass.config_entries.async_unload(entry.entry_id)

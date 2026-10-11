@@ -787,3 +787,55 @@ async def test_fixed_battery_state_is_sent(
     await add(up, Sample(ts, {"b1": -250.0}), last_built=ts)
     await up._async_upload_statuses()
     assert up.client.singles == [{"d": "20261010", "t": "10:05", "b1": "-250", "b6": "3"}]
+
+
+async def test_backlog_without_battery(
+    hass: HomeAssistant, tmp_path: Path, now: FrozenDateTimeFactory
+) -> None:
+    up = await make(hass, tmp_path, [field("v5"), field("b1")], donor=True)
+    times = [local_ts(10, 10, 10, m) for m in (5, 10, 15)]
+    await add(
+        up,
+        Sample(times[0], {"v5": 20.0, "b1": -100.0}, DONE),
+        Sample(times[1], {"v5": 21.0, "b1": -200.0}, DONE),
+        Sample(times[2], {"b1": -300.0}, DONE),  # battery only
+        last_built=times[-1],
+    )
+    await up.async_reupload(local_dt(10, 10), date(2026, 10, 10), "statuses", without_battery=True)
+    await up._async_upload_statuses()
+
+    # One batch, no battery values; the battery-only status is skipped.
+    assert up.client.batches == [["20261010,10:05,,,,,20", "20261010,10:10,,,,,21"]]
+    assert up.client.singles == []
+    assert set((await states(up, 0, 2**40)).values()) == {DONE}
+    assert await up._run(up.store.get_meta, "no_battery_until") is None
+
+    # New statuses keep their battery values.
+    ts = local_ts(10, 10, 10, 25)
+    await add(up, Sample(ts, {"v5": 22.0, "b1": -400.0}), last_built=ts)
+    now.move_to(local_dt(10, 10, 10, 30))
+    await up._async_upload_statuses()
+    assert up.client.singles == [{"d": "20261010", "t": "10:25", "v5": "22", "b1": "-400"}]
+
+
+async def test_reupload_with_battery_clears_the_batch_mode(
+    hass: HomeAssistant, tmp_path: Path, now: FrozenDateTimeFactory
+) -> None:
+    up = await make(hass, tmp_path, [field("v5"), field("b1")], donor=True)
+    ts = local_ts(10, 10, 10, 5)
+    await add(up, Sample(ts, {"v5": 20.0, "b1": -100.0}, DONE), last_built=ts)
+    await up.async_reupload(local_dt(10, 10), date(2026, 10, 10), "statuses", without_battery=True)
+    # Changed your mind: a normal reupload sends the battery values again.
+    await up.async_reupload(local_dt(10, 10), date(2026, 10, 10), "statuses")
+    await up._async_upload_statuses()
+    assert up.client.batches == []
+    assert up.client.singles == [{"d": "20261010", "t": "10:05", "v5": "20", "b1": "-100"}]
+
+
+async def test_without_battery_needs_battery_fields(
+    hass: HomeAssistant, tmp_path: Path, now: FrozenDateTimeFactory
+) -> None:
+    up = await make(hass, tmp_path, [field("v5")], donor=True)
+    assert up.sends_battery is False
+    await up.async_reupload(local_dt(10, 10), date(2026, 10, 10), "statuses", without_battery=True)
+    assert await up._run(up.store.get_meta, "no_battery_until") is None
