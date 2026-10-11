@@ -31,6 +31,7 @@ from .builder import (
     async_build_from_statistics,
 )
 from .const import (
+    DIRECTION_DOWNLOAD,
     DIRECTION_UPLOAD,
     MAP_DIRECTION,
     MODE_DOWNLOAD,

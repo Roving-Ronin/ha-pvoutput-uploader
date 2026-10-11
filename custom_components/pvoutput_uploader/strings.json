@@ -51,7 +51,7 @@
       },
       "add_download": {
         "title": "Add field from PVOutput",
-        "description": "The field's latest value is read from PVOutput (getstatus) once per upload interval into a sensor named \"<field> <name> from PVOutput\", next to a Normalised output sensor. Battery fields (b1-b6) are not returned by PVOutput, so they are not listed; extended fields (v7-v12) need a donor account. To upload the field later, set it to Send under **Fields** and give it a sensor or fixed value.",
+        "description": "The field's latest value is read from PVOutput (getstatus) once per upload interval into a sensor named after the field and its name, e.g. *v2 Power from PVOutput*, next to a Normalised output sensor. Battery fields (b1-b6) are not returned by PVOutput, so they are not listed; extended fields (v7-v12) need a donor account. To upload the field later, set it to Send under **Fields** and give it a sensor or fixed value.",
         "data": {
           "field": "PVOutput field",
           "name": "Name in PVOutput",
