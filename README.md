@@ -341,9 +341,14 @@ The PVOutput system's device page shows what is uploaded and as what:
   uploading is switched on or what PVOutput accepted: see the **Uploading** switch and the
   diagnostic sensors for that.
 - **Uploading** switch: stops sending while recording carries on.
+- **Clear queued history** button: takes the waiting history off the queue (statuses
+  older than the last two upload intervals, and queued daily totals) and ends a "leave
+  out battery fields" run. Current statuses keep going. Nothing is deleted: cleared
+  statuses stay in the log as unsent (**Cleared samples**), and **Reupload history**,
+  also *since the first unsent status*, sends them again.
 - Diagnostic sensors: last upload, samples waiting, daily outputs waiting, rejected
-  samples, partly sent samples, rejected daily outputs, history size and start, requests
-  left this hour, rate limit pause, account type, last error.
+  samples, partly sent samples, cleared samples, rejected daily outputs, history size and
+  start, requests left this hour, rate limit pause, account type, last error.
 
 ## Settings
 

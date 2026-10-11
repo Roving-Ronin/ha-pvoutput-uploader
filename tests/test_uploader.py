@@ -921,3 +921,34 @@ async def test_history_reserve_follows_the_reset(
     up = await make(hass, tmp_path / "b", [field("v2")], **{CONF_UPLOAD_INTERVAL: "15"})
     up.client.rate_reset = local_ts(10, 10, 11, 31)
     assert up._history_reserve() == 5 + 2 + 1  # 30 minutes, 15 minute interval
+
+
+async def test_clear_queue_keeps_current_statuses(
+    hass: HomeAssistant, tmp_path: Path, now: FrozenDateTimeFactory
+) -> None:
+    up = await make(hass, tmp_path, [field("v2")])
+    old = [local_ts(10, 9, 12, m) for m in (0, 5)]
+    current = local_ts(10, 10, 10, 15)
+    await add(
+        up,
+        *(Sample(t, {"v2": 1.0}) for t in old),
+        Sample(current, {"v2": 2.0}),
+        last_built=current,
+    )
+    await up._run(up.store.queue_outputs, ["20261001"])
+    await up._run(up.store.set_meta, "no_battery_until", "1")
+
+    assert await up.async_clear_queue() == {"samples": 2, "daily_outputs": 1}
+    assert await up._run(up.store.get_meta, "no_battery_until") is None
+    assert up.summary["cleared"] == 2
+    await up._async_upload_statuses()
+    await up._async_upload_outputs()
+    # Only the current status is sent.
+    assert up.client.batches == [["20261010,10:15,,2"]]
+    assert up.client.outputs == []
+
+    # Cleared history can be sent again since the first unsent status.
+    assert await up.async_first_unsent() == old[0]
+    await up.async_reupload(local_dt(10, 9, 12, 0), date(2026, 10, 10), "statuses")
+    await up._async_upload_statuses()
+    assert up.client.batches[-1] == ["20261009,12:00,,1", "20261009,12:05,,1"]

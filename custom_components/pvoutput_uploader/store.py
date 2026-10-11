@@ -19,6 +19,8 @@ EXPIRED = 2
 FAILED = 3
 # Sent without values PVOutput rejected; counts as unsent for a reupload.
 PARTIAL = 4
+# Taken off the queue by the user; still unsent, so a reupload finds it.
+CLEARED = 5
 
 
 @dataclass(slots=True)
@@ -204,6 +206,28 @@ class SampleStore:
         )
         return self._execute("SELECT since FROM unconfirmed WHERE slot = ?", (slot,))[0][0]
 
+    def clear_pending(self, before: int) -> int:
+        """Take pending rows older than ``before`` off the queue (cleared).
+
+        Returns how many rows were cleared. Their retry windows end too.
+        """
+        count = self._execute(
+            "SELECT COUNT(*) FROM samples WHERE uploaded = ? AND ts < ?",
+            (PENDING, before),
+        )[0][0]
+        self._execute(
+            "UPDATE samples SET uploaded = ? WHERE uploaded = ? AND ts < ?",
+            (CLEARED, PENDING, before),
+        )
+        self._execute("DELETE FROM unconfirmed WHERE slot < ?", (before,))
+        return count
+
+    def clear_queued_outputs(self) -> int:
+        """Drop daily outputs waiting to be sent (rejected ones stay listed)."""
+        count = self._execute("SELECT COUNT(*) FROM output_queue WHERE failed = 0")[0][0]
+        self._execute("DELETE FROM output_queue WHERE failed = 0")
+        return count
+
     def purge(self, before: int) -> None:
         """Delete rows older than ``before``."""
         self._execute("DELETE FROM samples WHERE ts < ?", (before,))
@@ -276,6 +300,7 @@ class SampleStore:
             "pending": counts.get(PENDING, 0),
             "failed": counts.get(FAILED, 0),
             "partial": counts.get(PARTIAL, 0),
+            "cleared": counts.get(CLEARED, 0),
             "expired": counts.get(EXPIRED, 0),
             "oldest": oldest,
             "newest": newest,

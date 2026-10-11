@@ -323,3 +323,23 @@ async def test_reupload_offers_without_battery_only_with_battery(
     assert reupload.call_args.kwargs == {"without_battery": True}
 
     assert await hass.config_entries.async_unload(entry.entry_id)
+
+
+async def test_clear_queue_button(
+    recorder_mock, hass: HomeAssistant, entry: MockConfigEntry
+) -> None:
+    with patch(GET_SYSTEM, AsyncMock(return_value=SystemInfo("My System", 5, False))):
+        await _setup(hass, entry)
+    assert hass.states.get("button.my_system_clear_queued_history") is not None
+    uploader = entry.runtime_data.uploader
+    with patch.object(
+        uploader,
+        "async_clear_queue",
+        AsyncMock(return_value={"samples": 0, "daily_outputs": 0}),
+    ) as clear:
+        await hass.services.async_call(
+            "button", "press", {"entity_id": "button.my_system_clear_queued_history"},
+            blocking=True,
+        )
+    clear.assert_awaited_once()
+    assert await hass.config_entries.async_unload(entry.entry_id)

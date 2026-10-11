@@ -801,6 +801,28 @@ class Uploader:
 
     # Services
 
+    async def async_clear_queue(self) -> dict[str, int]:
+        """Take the waiting history off the queue; current statuses stay.
+
+        Cleared statuses stay in the log as unsent, so a reupload (also since
+        the first unsent status) can send them again. Queued daily outputs are
+        dropped, and a "leave out battery fields" run ends.
+        """
+        async with self.lock:
+            stored = await self._run(self.store.get_meta, META_LAST_BUILT)
+            last_built = int(stored) if stored else int(time.time())
+            current_from = last_built - CURRENT_SLOTS * self.upload_interval + 1
+            statuses = await self._run(self.store.clear_pending, current_from)
+            outputs = await self._run(self.store.clear_queued_outputs)
+            await self._run(self.store.set_meta, META_NO_BATTERY_UNTIL, None)
+            await self._refresh_summary()
+        _LOGGER.info(
+            "Cleared %s waiting samples and %s daily outputs from the queue",
+            statuses,
+            outputs,
+        )
+        return {"samples": statuses, "daily_outputs": outputs}
+
     async def async_first_unsent(self) -> int | None:
         """Return the oldest sample not confirmed by PVOutput (waiting, rejected or expired)."""
         return await self._run(self.store.first_unsent)

@@ -83,6 +83,11 @@ SENSORS = (
         value_fn=lambda u: u.summary.get("partial"),
     ),
     PVOutputSensorDescription(
+        key="cleared_samples",
+        entity_category=EntityCategory.DIAGNOSTIC,
+        value_fn=lambda u: u.summary.get("cleared"),
+    ),
+    PVOutputSensorDescription(
         key="failed_outputs",
         entity_category=EntityCategory.DIAGNOSTIC,
         value_fn=lambda u: u.summary.get("failed_outputs"),

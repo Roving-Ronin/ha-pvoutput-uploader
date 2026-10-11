@@ -213,7 +213,7 @@
     },
     "reupload_from": {
       "options": {
-        "since_failure": "Since the first unsent status (waiting, rejected, partly sent or too old)",
+        "since_failure": "Since the first unsent status (waiting, rejected, partly sent, cleared or too old)",
         "from_time": "From a date and time"
       }
     },
@@ -245,6 +245,9 @@
       "partial_samples": {
         "name": "Partly sent samples"
       },
+      "cleared_samples": {
+        "name": "Cleared samples"
+      },
       "history_samples": {
         "name": "History samples"
       },
@@ -266,6 +269,11 @@
       },
       "last_error": {
         "name": "Last error"
+      }
+    },
+    "button": {
+      "clear_queue": {
+        "name": "Clear queued history"
       }
     },
     "switch": {

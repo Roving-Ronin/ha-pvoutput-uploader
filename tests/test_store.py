@@ -169,3 +169,25 @@ def test_unconfirmed_since_is_kept_until_the_slot_is_settled(tmp_path: Path) -> 
     store.expire_before(1000)
     assert store.unconfirmed_since(900, 9500.0) == 9500.0
     store.close()
+
+
+def test_clear_pending_and_outputs(tmp_path: Path) -> None:
+    from custom_components.pvoutput_uploader.store import CLEARED
+
+    store = make_store(tmp_path)
+    store.add_samples([Sample(ts, {"v2": 1.0}) for ts in (300, 600, 900)])
+    store.mark_range(300, 301, DONE)
+    store.unconfirmed_since(600, 1.0)
+    assert store.clear_pending(900) == 1  # 600; 300 was sent, 900 is newer
+    assert store.samples_between(600, 601)[0].uploaded == CLEARED
+    assert store.pending_ts(0, 1000, 10) == [900]
+    assert store.first_unsent() == 600  # still unsent: a reupload finds it
+    assert store.summary()["cleared"] == 1
+    assert store.unconfirmed_since(600, 9.0) == 9.0  # retry window ended
+
+    store.queue_outputs(["20261001", "20261002"])
+    store.reject_output("20261001", "bad")
+    assert store.clear_queued_outputs() == 1
+    assert store.queued_outputs(10) == []
+    assert store.rejected_outputs() == [("20261001", "bad")]  # still listed
+    store.close()

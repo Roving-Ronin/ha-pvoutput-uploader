@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.1.6b3
+
+- **Clear queued history** button on the PV site: takes the waiting history off the queue (statuses older than the last two upload intervals, and queued daily totals) and ends a "leave out battery fields" run, while current statuses keep going. Nothing is deleted: cleared statuses stay in the log as unsent, counted in the new **Cleared samples** sensor, and **Reupload history** (also since the first unsent status) sends them again.
+- Removed a stray `config_flow.py.bak` that had been shipped since 0.1.5.
+
 ## 0.1.6b2
 
 - **The history reserve is worked out, not fixed.** History stops when the requests left would only just cover every current status due before PVOutput's hourly limit resets, plus one, on top of the reserve of 5 for other uploaders. A 5 minute site with 40 minutes to go keeps 14; near the end of the hour, 7. Before the reset time is known, a full hour is assumed (18 at 5 minutes). Replaces the fixed 30 from 0.1.6b1, so a backlog gets almost the whole hour.
