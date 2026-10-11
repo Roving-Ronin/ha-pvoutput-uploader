@@ -259,6 +259,11 @@ the log are kept unless *Replace recorded values* is on.
 With *Send to PVOutput* on, the imported period is sent like any backlog; with it off it
 is only stored, ready for a later reupload.
 
+**Historical uploads in progress.** This example shows 4,935 stored history samples,
+with 4,657 still waiting to upload. The diagnostics show progress as the backlog is sent.
+
+<img src="docs/images/pvoutput-history-upload.png" alt="PVOutput history upload diagnostics showing 4,935 stored samples, history starting three weeks ago, and 4,657 samples waiting to upload" width="325">
+
 ## How it works
 
 - **History log.** Every minute the integration reads the closed 5 minute slots of all
