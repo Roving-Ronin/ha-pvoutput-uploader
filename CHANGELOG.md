@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.1.6b11
+
+- **Passive-field windows no longer overlap.** A newer reupload or import is cut out of older windows (an older one around it keeps the parts before and after), so when the newer one finishes first its period cannot fall back to the older choice. A status uses a window only when one of its actual 5 minute rows lies in it.
+- **Clear queued history** also clears the passive-field choices of the cleared periods.
+
 ## 0.1.6b10
 
 - **Passive-field choices no longer overwrite each other.** Each reupload or import keeps its own passive fields for its own period, also while an earlier one is still being sent; where periods overlap, the newest choice wins. Choices are dropped once nothing in their period is waiting.

@@ -863,6 +863,8 @@ class Uploader:
             statuses = await self._run(self.store.clear_pending, current_from)
             outputs = await self._run(self.store.clear_queued_outputs)
             await self._run(self.store.set_meta, META_NO_BATTERY_UNTIL, None)
+            # The queued periods' passive-field choices end with them.
+            await self._save_passive_windows([])
             await self._refresh_summary()
         _LOGGER.info(
             "Cleared %s waiting samples and %s daily outputs from the queue",
@@ -1032,17 +1034,22 @@ class Uploader:
     ) -> bool:
         """Record which passive fields statuses in [start, end] also send.
 
-        The window is added to the others, so an operation still sending keeps
-        its own choice; where they overlap, this newest one wins. Windows it
-        fully covers are dropped. Returns whether any (still passive) field
-        was chosen.
+        The new period is cut out of the older windows (an older window around
+        it keeps its parts before and after), so windows never overlap: every
+        period belongs to the newest choice made for it, and dropping a finished
+        window cannot hand its period back to an older choice. Returns whether
+        any (still passive) field was chosen.
         """
         fields = sorted(set(passive_fields) & {m.field for m in self.passive_mappings})
-        windows = [
-            w
-            for w in await self._passive_windows()
-            if not (start <= w["from"] and w["to"] <= end)
-        ]
+        windows: list[dict[str, Any]] = []
+        for w in await self._passive_windows():
+            if w["to"] < start or w["from"] > end:
+                windows.append(w)
+                continue
+            if w["from"] < start:
+                windows.append(w | {"to": start - 1})
+            if w["to"] > end:
+                windows.append(w | {"from": end + 1})
         windows.append({"from": start, "to": end, "fields": fields})
         await self._save_passive_windows(windows)
         return bool(fields)
@@ -1061,9 +1068,17 @@ class Uploader:
 
     @staticmethod
     def _passive_for(windows: list[dict[str, Any]], slot: int, step: int) -> list[str]:
-        """Return the passive fields the slot ending at ``slot`` also sends."""
+        """Return the passive fields the slot ending at ``slot`` also sends.
+
+        A window applies when one of the slot's 5 minute rows (ending in
+        (slot - step, slot]) lies in it. Windows do not overlap; newest first
+        settles a slot whose rows fall in two windows.
+        """
+        first_row = slot - step + LOG_INTERVAL
         for w in reversed(windows):
-            if w["from"] <= slot and slot - step < w["to"]:
+            lo = max(w["from"], first_row)
+            lo = -(-lo // LOG_INTERVAL) * LOG_INTERVAL  # first row at or after lo
+            if lo <= min(w["to"], slot):
                 return w["fields"]
         return []
 

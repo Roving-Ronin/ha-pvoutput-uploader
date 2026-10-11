@@ -1288,3 +1288,61 @@ async def test_passive_only_site_sends_imported_passive_fields(
     assert up.client.batches == [
         [line("12:00", day="20261009", v5="20"), line("12:05", day="20261009", v5="20")]
     ]
+
+
+async def test_a_finished_newer_choice_is_not_handed_back(
+    hass: HomeAssistant, tmp_path: Path, now: FrozenDateTimeFactory
+) -> None:
+    """A: 10:00-12:00 with v5; B: 11:00-11:30 with v6; B finishes first."""
+    up = await make(
+        hass, tmp_path, [field("v2"), field("v5", active=False), field("v6", active=False)]
+    )
+    rows = [local_ts(10, 9, h, m) for h, m in ((10, 0), (11, 0), (11, 15), (12, 0))]
+    await add(
+        up,
+        *(Sample(t, {"v2": 1.0, "v5": 2.0, "v6": 3.0}, DONE) for t in rows),
+        last_built=local_ts(10, 10, 10, 15),
+    )
+    await up.async_reupload(local_dt(10, 9, 10, 0), local_dt(10, 9, 12, 0), "statuses", passive_fields=["v5"])
+    await up.async_reupload(local_dt(10, 9, 11, 0), local_dt(10, 9, 11, 30), "statuses", passive_fields=["v6"])
+
+    # A is split around B: the windows no longer overlap.
+    windows = await up._passive_windows()
+    assert [(w["fields"], w["from"], w["to"]) for w in windows] == [
+        (["v5"], rows[0], rows[1] - 1),
+        (["v5"], local_ts(10, 9, 11, 30) + 1, rows[3]),
+        (["v6"], rows[1], local_ts(10, 9, 11, 30)),
+    ]
+
+    # B's statuses are sent; A still has 10:00 waiting.
+    await up._run(up.store.mark_range, rows[1], rows[3] + 1, DONE)
+    windows = await up._prune_passive_windows()
+    assert [w["fields"] for w in windows] == [["v5"]]  # only A's part before B
+    # B's period does not fall back to A's v5.
+    assert up._passive_for(windows, rows[2], 300) == []
+    assert up._passive_for(windows, rows[1], 300) == []
+    assert up._passive_for(windows, rows[0], 300) == ["v5"]
+
+
+async def test_window_edge_is_row_exact(
+    hass: HomeAssistant, tmp_path: Path, now: FrozenDateTimeFactory
+) -> None:
+    up = await make(hass, tmp_path, [field("v2")])
+    window = {"from": local_ts(10, 9, 10, 0), "to": local_ts(10, 9, 11, 0) - 1, "fields": ["v5"]}
+    # The 5 minute status at 11:00 has no row in a window ending at 10:59:59.
+    assert up._passive_for([window], local_ts(10, 9, 11, 0), 300) == []
+    assert up._passive_for([window], local_ts(10, 9, 10, 55), 300) == ["v5"]
+    # A 15 minute status ending 11:00 has rows at 10:50 and 10:55 in it.
+    assert up._passive_for([window], local_ts(10, 9, 11, 0), 900) == ["v5"]
+
+
+async def test_clear_queue_clears_passive_choices(
+    hass: HomeAssistant, tmp_path: Path, now: FrozenDateTimeFactory
+) -> None:
+    up = await make(hass, tmp_path, [field("v2"), field("v5", active=False)])
+    ts = local_ts(10, 9, 12, 0)
+    await add(up, Sample(ts, {"v2": 1.0, "v5": 2.0}, DONE), last_built=local_ts(10, 10, 10, 15))
+    await up.async_reupload(local_dt(10, 9, 12, 0), local_dt(10, 9, 12, 0), "statuses", passive_fields=["v5"])
+    assert await up._passive_windows() != []
+    await up.async_clear_queue()
+    assert await up._passive_windows() == []
