@@ -217,11 +217,7 @@
       },
       "download_history": {
         "title": "Download history from PVOutput",
-        "description": "Reads PVOutput's statuses for the chosen days and keeps every column it has (v1-v12 and normalised output, whatever the fields are set to) as hourly statistics named *... (PVOutput history)*: energy as hourly totals, the rest as hourly mean, min and max. Fields in Download mode also get it in their *from PVOutput* sensor, for the time before the sensor existed. Hours PVOutput has detail for replace what was downloaded before; other hours stay.
-
-The days are read in the background, one request per day, at the pace the hourly limit allows. The **Daily history download** switch already adds yesterday every day.
-
-Downloaded so far: {days} days, from **{first}**. {busy}",
+        "description": "Reads PVOutput's statuses for the chosen days and keeps every column it has (v1-v12 and normalised output, whatever the fields are set to) as hourly statistics named *... (PVOutput history)*: energy as hourly totals, the rest as hourly mean, min and max. Fields in Download mode also get it in their *from PVOutput* sensor, for the time before the sensor existed. Hours PVOutput has detail for replace what was downloaded before; other hours stay.\n\nThe days are read in the background, one request per day, at the pace the hourly limit allows. The **Daily history download** switch already adds yesterday every day.\n\nDownloaded so far: {days} days, from **{first}**. {busy}",
         "data": {
           "start": "From",
           "end": "To"
