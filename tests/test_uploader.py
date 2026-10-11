@@ -839,3 +839,20 @@ async def test_without_battery_needs_battery_fields(
     assert up.sends_battery is False
     await up.async_reupload(local_dt(10, 10), date(2026, 10, 10), "statuses", without_battery=True)
     assert await up._run(up.store.get_meta, "no_battery_until") is None
+
+
+async def test_five_requests_are_kept_in_reserve(
+    hass: HomeAssistant, tmp_path: Path, now: FrozenDateTimeFactory
+) -> None:
+    up = await make(hass, tmp_path, [field("v2")])
+    ts = local_ts(10, 10, 10, 5)
+    await add(up, Sample(ts, {"v2": 100.0}), last_built=ts)
+    up.client.rate_reset = local_ts(10, 10, 11, 0)
+
+    up.client.rate_remaining = 5
+    await up._async_upload_statuses()
+    assert up.client.batches == []
+
+    up.client.rate_remaining = 6
+    await up._async_upload_statuses()
+    assert len(up.client.batches) == 1

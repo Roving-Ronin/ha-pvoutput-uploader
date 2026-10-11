@@ -307,9 +307,10 @@ with 4,657 still waiting to upload. The diagnostics show progress as the backlog
 - **Unavailable sensors** leave a gap in the log rather than a value: no average, no
   last value, and no energy for a slot with no counter reading. Energy is counted when
   the counter reports again.
-- **Rate limit.** The `X-Rate-Limit-*` headers of every answer are tracked, and a few
-  requests are kept in hand. Requests are sent at least 0.3 seconds apart, so a backlog goes out at
-  a steady pace rather than in a burst.
+- **Rate limit.** The `X-Rate-Limit-*` headers of every answer are tracked, and the last
+  5 requests of each hour are kept in hand: the limit belongs to the API key, so other
+  uploaders using the same key (e.g. IoTaWatt) still have room. Requests are sent at
+  least 0.3 seconds apart, so a backlog goes out at a steady pace rather than in a burst.
 - **Donor features** are detected from the account (or set by hand): extended fields
   v7-v12, battery fields b1-b6, statuses 90 days back and 100 per request.
   Donor status is detected when the integration is first added and whenever it reloads.

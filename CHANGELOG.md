@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.6b1
+
+- The last 5 requests of each hour (was 2) are kept in reserve. PVOutput's hourly limit belongs to the API key, so other uploaders using the same key, such as IoTaWatt, keep room while a backlog is sent.
+
 ## 0.1.5
 
 - **Reupload history → Leave out battery fields (much faster)**, shown only when battery fields are sent: everything waiting up to the moment you submit is sent in batches of 100 without battery values (b1-b6) instead of one request per status, so weeks of history go out in minutes rather than a day. Statuses holding only battery values are skipped, new statuses keep their battery values, and reuploading the period again without the tick adds the battery values. The `reupload` action takes `without_battery`.
