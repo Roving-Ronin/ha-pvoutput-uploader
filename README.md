@@ -147,6 +147,8 @@ Each action saves as soon as it is submitted.
   configured, **Add field** is not shown and the menu says why: on a standard account
   that is v1-v6, as extended and battery fields need a donor account.
 - **Edit field** / **Remove fields**.
+- **Active fields**: one page with every configured field; ticked fields are sent,
+  unticked ones are passive (recorded only). The same as the per-field switches below.
 - **Reupload history**: send the log again, since the first unsent status or from a
   date and time.
 - **Import history from Home Assistant**: fill the log from the recorder for a past
@@ -323,6 +325,9 @@ The PVOutput system's device page shows what is uploaded and as what:
   uploading is switched on or what PVOutput accepted: see the **Uploading** switch and the
   diagnostic sensors for that.
 - **Uploading** switch: stops sending while recording carries on.
+- **Send <field>** switches, one per field (e.g. *Send v5 Ambient*), under
+  Configuration: on makes the field active, off passive. Switching saves the
+  configuration and the site reloads to apply it, which takes a few seconds.
 - **Clear queued history** button: takes the waiting history off the queue (statuses
   older than the last two upload intervals, and queued daily totals) and ends a "leave
   out battery fields" run. Current statuses keep going. Nothing is deleted: cleared

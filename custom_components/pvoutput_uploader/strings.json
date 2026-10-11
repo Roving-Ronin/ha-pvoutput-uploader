@@ -33,6 +33,7 @@
         "menu_options": {
           "add_field": "Add field",
           "edit_field": "Edit field",
+          "active_fields": "Active fields",
           "remove_field": "Remove fields",
           "reupload": "Reupload history",
           "import_history": "Import history from Home Assistant",
@@ -120,6 +121,13 @@
           "active": "Off (passive): recorded but not sent.",
           "aggregate": "How the 5 minute values of an interval are combined.",
           "source_unit": "For sensors without a unit, enter the actual source unit (e.g. kW, kWh, °C or °F). A sensor's reported unit takes precedence. Fixed values use PVOutput's unit; this sets the unit only for user-defined extended fields."
+        }
+      },
+      "active_fields": {
+        "title": "Active fields",
+        "description": "Ticked fields are active (sent to PVOutput); unticked ones are passive: still recorded, not sent. Their history can be sent later with Reupload history. Each field also has a switch on the device page.",
+        "data": {
+          "active_fields": "Send to PVOutput"
         }
       },
       "remove_field": {

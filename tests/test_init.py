@@ -369,3 +369,47 @@ async def test_clear_queue_button(
         )
     clear.assert_awaited_once()
     assert await hass.config_entries.async_unload(entry.entry_id)
+
+
+async def test_field_active_switches(
+    recorder_mock, hass: HomeAssistant, entry: MockConfigEntry
+) -> None:
+    fields = [
+        {
+            "field": "v5", "entity_id": "sensor.outside", "constant": None,
+            "name": "Ambient", "active": True, "aggregate": "average",
+        },
+        {
+            "field": "v6", "entity_id": "sensor.voltage", "constant": None,
+            "name": "Grid", "active": False, "aggregate": "average",
+        },
+    ]
+    hass.config_entries.async_update_entry(
+        entry, options=dict(entry.options) | {"fields": fields}
+    )
+    with patch(GET_SYSTEM, AsyncMock(return_value=SystemInfo("My System", 5, False))):
+        await _setup(hass, entry)
+        assert hass.states.get("switch.my_system_send_v5_ambient").state == "on"
+        assert hass.states.get("switch.my_system_send_v6_grid").state == "off"
+        # The field sensors are not taken for removed fields' switches, or the reverse.
+        assert hass.states.get("sensor.my_system_v5_ambient") is not None
+
+        await hass.services.async_call(
+            "switch", "turn_off", {"entity_id": "switch.my_system_send_v5_ambient"},
+            blocking=True,
+        )
+        await hass.async_block_till_done(wait_background_tasks=True)
+        assert {m["field"]: m["active"] for m in entry.options["fields"]} == {
+            "v5": False, "v6": False,
+        }
+        # After the reload the switch shows the new state.
+        assert hass.states.get("switch.my_system_send_v5_ambient").state == "off"
+
+        await hass.services.async_call(
+            "switch", "turn_on", {"entity_id": "switch.my_system_send_v6_grid"},
+            blocking=True,
+        )
+        await hass.async_block_till_done(wait_background_tasks=True)
+        assert entry.options["fields"][1]["active"] is True
+
+    assert await hass.config_entries.async_unload(entry.entry_id)

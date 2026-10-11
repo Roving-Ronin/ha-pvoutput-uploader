@@ -175,7 +175,8 @@ async def test_add_sensor_field(recorder_mock, hass: HomeAssistant, sensors) -> 
     # The menu now lists it, and the used field is no longer offered.
     result = await _menu(hass, entry)
     assert result["menu_options"] == [
-        "add_field", "edit_field", "remove_field", "reupload", "import_history", "settings"
+        "add_field", "edit_field", "active_fields", "remove_field", "reupload",
+        "import_history", "settings",
     ]
     assert "Outside" in result["description_placeholders"]["fields"]
     result = await _add(hass, entry, "add_sensor")
@@ -482,7 +483,7 @@ async def test_no_add_field_when_all_in_use(recorder_mock, hass: HomeAssistant) 
     )
     result = await _menu(hass, entry)
     assert "add_field" not in result["menu_options"]
-    assert result["menu_options"][:2] == ["edit_field", "remove_field"]
+    assert result["menu_options"][:3] == ["edit_field", "active_fields", "remove_field"]
     assert "Every field a standard account can send" in result["description_placeholders"]["fields"]
 
 
@@ -512,3 +513,21 @@ async def test_last_field_taken_after_the_menu(recorder_mock, hass: HomeAssistan
         result = await _choose(hass, result, step)
         assert result["type"] is FlowResultType.ABORT
         assert result["reason"] == "no_free_fields"
+
+
+async def test_active_fields_on_one_page(recorder_mock, hass: HomeAssistant) -> None:
+    fields = [
+        _mapping("v2", "sensor.power"),
+        _mapping("v5", "sensor.outside") | {"active": False},
+        _mapping("v6", "sensor.voltage"),
+    ]
+    entry = options_entry(hass, fields=fields)
+    result = await _choose(hass, await _menu(hass, entry), "active_fields")
+    assert result["step_id"] == "active_fields"
+    assert select_options(result, "active_fields") == ["v2", "v5", "v6"]
+
+    result = await _configure(hass, result, {"active_fields": ["v5", "v6"]})
+    assert result["type"] is FlowResultType.CREATE_ENTRY
+    assert {m["field"]: m["active"] for m in entry.options[CONF_FIELDS]} == {
+        "v2": False, "v5": True, "v6": True,
+    }

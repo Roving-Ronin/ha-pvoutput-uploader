@@ -146,7 +146,11 @@ async def async_setup_entry(
     prefix = f"{entry.data[CONF_SYSTEM_ID]}_field_"
     registry = er.async_get(hass)
     for reg_entry in er.async_entries_for_config_entry(registry, entry.entry_id):
-        if reg_entry.unique_id.startswith(prefix) and reg_entry.unique_id not in wanted:
+        if (
+            reg_entry.domain == "sensor"
+            and reg_entry.unique_id.startswith(prefix)
+            and reg_entry.unique_id not in wanted
+        ):
             registry.async_remove(reg_entry.entity_id)
     async_add_entities(
         [

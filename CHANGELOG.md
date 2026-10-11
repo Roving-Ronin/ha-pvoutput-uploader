@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.1.6b6
+
+- **Make fields active or passive in one go.** Each field has a **Send <field>** switch on the PV site's device page (under Configuration), and **Configure → Active fields** lists every field on one page with a tick for active. Both save the field's Active setting; the site reloads to apply it.
+- The cleanup of removed fields' sensors now only looks at sensors.
+
 ## 0.1.6b5
 
 - **Reupload history → Also send passive fields.** Passive fields are recorded but not sent; a reupload can now send the ones you tick (all by default) for the statuses of the chosen period only, while live statuses keep them off. Donor and battery rules still apply, and the next reupload replaces the choice. Shown only when the site has passive fields; the `reupload` action takes `passive_fields`.

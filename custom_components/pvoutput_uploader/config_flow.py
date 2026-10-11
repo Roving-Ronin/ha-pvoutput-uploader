@@ -82,6 +82,7 @@ from .services import (
 )
 from .uploader import REUPLOAD_AUTO, REUPLOAD_OUTPUTS, REUPLOAD_STATUSES, Uploader
 
+CONF_ACTIVE_FIELDS = "active_fields"
 ATTR_FROM = "from"
 FROM_FAILURE = "since_failure"
 FROM_TIME = "from_time"
@@ -296,7 +297,7 @@ class PVOutputUploaderOptionsFlow(OptionsFlow):
             # Nothing left to add: no Add field, and say why.
             fields += "\n\n" + self._all_in_use()
         if self._fields:
-            menu += ["edit_field", "remove_field"]
+            menu += ["edit_field", "active_fields", "remove_field"]
         menu += ["reupload", "import_history", "settings"]
         detected = self.config_entry.data.get(CONF_DETECTED_INTERVAL, DEFAULT_INTERVAL_MINUTES)
         return self.async_show_menu(
@@ -561,6 +562,43 @@ class PVOutputUploaderOptionsFlow(OptionsFlow):
             data_schema=self.add_suggested_values_to_schema(schema, defaults),
             description_placeholders={"field": f"{field} · {fdef.name}"},
             errors=errors,
+        )
+
+    async def async_step_active_fields(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Make fields active (sent) or passive (recorded only) on one page."""
+        if user_input is not None:
+            # Apply to the configuration as saved now, not as first shown.
+            self._options = deepcopy(DEFAULT_OPTIONS) | deepcopy(dict(self.config_entry.options))
+            active = set(user_input[CONF_ACTIVE_FIELDS])
+            for mapping in self._fields:
+                mapping[MAP_ACTIVE] = mapping[MAP_FIELD] in active
+            return self._save()
+        order = {key: n for n, key in enumerate(FIELD_KEYS)}
+        fields = sorted(self._fields, key=lambda m: order[m[MAP_FIELD]])
+        return self.async_show_form(
+            step_id="active_fields",
+            data_schema=vol.Schema(
+                {
+                    vol.Optional(
+                        CONF_ACTIVE_FIELDS,
+                        default=[m[MAP_FIELD] for m in fields if m.get(MAP_ACTIVE, True)],
+                    ): SelectSelector(
+                        SelectSelectorConfig(
+                            options=[
+                                SelectOptionDict(
+                                    value=m[MAP_FIELD],
+                                    label=f"{m[MAP_FIELD]} · {m.get(MAP_NAME) or FIELDS_BY_KEY[m[MAP_FIELD]].name}",
+                                )
+                                for m in fields
+                            ],
+                            multiple=True,
+                            mode=SelectSelectorMode.LIST,
+                        )
+                    )
+                }
+            ),
         )
 
     async def async_step_remove_field(
