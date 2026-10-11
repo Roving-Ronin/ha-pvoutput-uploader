@@ -141,7 +141,7 @@ Each action saves as soon as it is submitted.
     (for `b6`, the battery state, you pick the state from a list). It is not logged and
     never sends a status on its own.
   - **From PVOutput**: the field is read from PVOutput into a sensor instead of sent
-    (see **Download** below). No Home Assistant source is needed.
+    (see **Field modes** and **Download** below). No Home Assistant source is needed.
 
   Each PVOutput field can be used once. The lists offer only fields still free, and the
   choice is checked again when you submit, against the configuration as saved at that
@@ -152,9 +152,9 @@ Each action saves as soon as it is submitted.
 - **Edit field** / **Remove fields**. A field added from PVOutput can be given a sensor
   or fixed value here, ready for switching it to upload.
 - **Fields**: one page with every configured field, each set to **Send** (active),
-  **Record only** (passive) or **Download**. The same as the per-field selects below.
-  Setting a field that has no Home Assistant source (added from PVOutput) to Send or
-  Record only asks for a sensor or fixed value on the next screen.
+  **Record only** (passive) or **Download**; see **Field modes** below. Setting a field
+  that has no Home Assistant source (added from PVOutput) to Send or Record only asks
+  for a sensor or fixed value on the next screen.
 - **Reupload history**: send the log again, since the first unsent status or from a
   date and time.
 - **Import history from Home Assistant**: fill the log from the recorder for a past
@@ -217,41 +217,98 @@ Field rows show the source friendly name and the unit sent to PVOutput, e.g. `Ou
 
 Sensors with a unit are converted automatically. For a sensor without one, enter its actual **Source / custom unit** when adding or editing the field (e.g. kW or °F); this is used for conversion, not just a label. Leave it empty when the source reports its unit. Fixed values are entered in PVOutput units; a custom unit applies only to extended fields. Changing a unit affects newly recorded or explicitly rebuilt history; existing samples keep their recorded values.
 
-**Active and passive.** All fields are recorded; only active ones are sent. A passive
-field builds up history in the log. To send that history, either make the field active
-and reupload, or keep it passive and tick it under **Also send passive fields** when
-you reupload: it is then sent for that period only, while live statuses keep it off.
+### Field modes: Send, Record only, Download
 
-**Working next to another uploader.** Fields that are not active, or not configured, are
-left empty, so PVOutput keeps what another uploader such as IoTaWatt sent for the same
-time. PVOutput needs one of v1-v4 in a status; a status holding only extra fields is
-retried for up to two hours, waiting for the other uploader to create it.
+Every configured field is in one of three modes. The mode decides what happens to the
+field; its configuration (sensor or fixed value, name, unit, how values are combined)
+is kept whatever the mode, so changing the mode never loses a setting.
+
+| Mode | Its Home Assistant sensor is recorded in the log | Sent to PVOutput | Read from PVOutput |
+|---|---|---|---|
+| **Send** (active) | yes | yes | no |
+| **Record only** (passive) | yes | no, unless chosen for a reupload or import | no |
+| **Download** | yes, if it has a sensor (see below) | no | yes, into *<field> <label> from PVOutput* |
+
+Two things belong to a field and are independent of each other:
+
+- **Its source**: a Home Assistant sensor, a fixed value, or nothing (a field added
+  with **Add field → From PVOutput**). Send and Record only need a source; Download
+  does not.
+- **Its mode**: what is done with it now.
+
+**Where to change the mode.** Three places, all saving the same setting:
+
+1. The field's **select** on the device page (under Configuration), e.g. *v5 Ambient*.
+   Handy for dashboards and automations (`select.select_option`).
+2. **Configure → Fields**: all fields on one page.
+3. **Add field**: *A sensor* or *A fixed value* starts in Send (or Record only, if
+   **Active** is off); *From PVOutput* starts in Download.
+
+Saving reloads the site, which takes a few seconds.
+
+**Which modes a field offers, and why.** Options are only offered where they can work:
+
+| Field | Select on the device page | Configure → Fields |
+|---|---|---|
+| Has a sensor or fixed value, v1-v6 | Send, Record only, Download | Send, Record only, Download |
+| Has a sensor or fixed value, v7-v12 | Send, Record only, + Download on a donor account | the same |
+| Battery field b1-b6 | Send, Record only (PVOutput does not return battery values) | the same |
+| No source (added from PVOutput) | **Download only** | Send, Record only, Download: choosing Send or Record only asks for a sensor or fixed value next |
+
+The select cannot ask questions, which is why a field without a source offers only
+Download there: give it a source under **Configure → Fields** (or **Edit field**) first,
+and from then on its select offers all three. Both places check the choice again when
+saving, against the field and account as saved at that moment, so a page left open
+while something changed (e.g. the account stopped being a donor) cannot set what is no
+longer possible; it shows an error and the options that apply now.
+
+**Switching between upload and download.**
+
+- *Send → Download*: sending stops, the download sensor appears. The field's sensor
+  **keeps being recorded** in the log (never sent), so if you switch back later, the
+  history has no gap and **Reupload history** can send it. What is downloaded is not
+  written to the log: PVOutput holds that history, and the download sensor's own
+  history is kept by Home Assistant's recorder.
+- *Download → Send / Record only*: the download sensor goes away and the field's kept
+  source is used again, with its full history in the log.
+- *From PVOutput (no source) → Send*: you are asked for a sensor or fixed value; from
+  then on it behaves like any other field. Its log starts at that moment, so import
+  earlier history with **Import history from Home Assistant** if you need it.
+- To stop recording a downloaded field's sensor, remove the field and add it again
+  with **From PVOutput**.
+
+**Passive (Record only) fields and history.** A passive field builds up history in the
+log. To send that history, either make the field active (Send) and reupload, or keep it
+passive and tick it under **Also send passive fields** when you reupload: it is then
+sent for that period only, while live statuses keep it off.
+
+**Working next to another uploader.** Fields that are not sent (Record only, Download)
+or not configured are left empty, so PVOutput keeps what another uploader such as
+IoTaWatt sent for the same time. PVOutput needs one of v1-v4 in a status; a status
+holding only extra fields is retried for up to two hours, waiting for the other
+uploader to create it. Download fits here too: let IoTaWatt send v1/v2 and download
+them into Home Assistant, while this integration sends temperature and battery.
 
 ### Download
 
-A field set to **Download** is read from PVOutput instead of sent: its latest value
+A field in **Download** mode is read from PVOutput instead of sent: its latest value
 (`getstatus.jsp`) lands in a sensor named *<field> <label> from PVOutput*, e.g.
-*v2 Power from PVOutput*, next to a **Normalised output from PVOutput** sensor (kWh/kW).
-It is read once per upload interval, whether or not **Uploading** is on, and uses one
-request from the hourly limit, keeping the same reserve as uploads. Energy fields (v1,
-v3) count Wh since local midnight, so they work in the Energy dashboard. A value
-PVOutput does not have shows as unknown, not 0. If reads keep failing (PVOutput or the
-network down, rate limit), the download sensors turn **unavailable** after three upload
-intervals rather than showing an old value as current; the `downloaded_at` attribute
-tells when the value was read, `pvoutput_status` which status it is. When PVOutput has no
-status yet (e.g. just after midnight) they show unknown; any other rejection by PVOutput
-shows in **Last error** and is retried the next interval.
+*v2 Power from PVOutput*, next to a **Normalised output from PVOutput** sensor (kWh/kW)
+present while any field downloads.
 
-- **Per field, both ways kept.** Switching a field to Download keeps its sensor or fixed
-  value and settings, so switching back to Send or Record only restores them. While it
-  downloads, **its Home Assistant sensor is still recorded in the log** (not what is
-  downloaded), so switching back leaves no gap; it is never sent while downloading.
-  Remove the field and add it from PVOutput instead to stop recording it.
-- The selects and the Fields page check each choice against the field and account as
-  they are when saving, so a stale page cannot set what is no longer allowed.
-- **Battery fields (b1-b6) cannot be downloaded:** PVOutput does not return them.
-  Extended fields (v7-v12) need a donor account. If the account stops being a donor, a
-  v7-v12 download field stays configured but shows unknown, with the attribute
+- **When:** once per upload interval, whether or not **Uploading** is on. Each read is
+  one request from the hourly limit, keeping the same reserve as uploads.
+- **Values:** energy fields (v1, v3) count Wh since local midnight, so they work in the
+  Energy dashboard. A value PVOutput does not have shows as unknown, not 0.
+- **Freshness:** if reads keep failing (PVOutput or the network down, rate limit), the
+  download sensors turn **unavailable** after three upload intervals rather than
+  showing an old value as current. The `downloaded_at` attribute tells when the value
+  was read, `pvoutput_status` which PVOutput status it is.
+- **No status yet** (e.g. just after midnight): unknown. Any other rejection by
+  PVOutput shows in **Last error** and is retried the next interval.
+- **Battery fields (b1-b6) cannot be downloaded**: PVOutput does not return them.
+  **Extended fields (v7-v12)** are returned to donors only. If the account stops being a
+  donor, a v7-v12 download field stays configured but shows unknown, with the attribute
   `not_downloaded_because: needs a PVOutput donor account`.
 - Download is the live value only; reading PVOutput history into statistics may come
   later.
@@ -373,11 +430,11 @@ The PVOutput system's device page shows what is uploaded and as what:
   diagnostic sensors for that.
 - **Uploading** switch: stops sending while recording carries on.
 - **One select per field** (e.g. *v5 Ambient*), under Configuration: **Send**,
-  **Record only** or **Download**. A field without a Home Assistant source offers
-  Download only until it gets one under Configure, and battery fields offer no Download.
-  Changing it saves the configuration and the site reloads to apply it, which takes a
-  few seconds. (Before 0.1.7 these were *Send <field>* switches; they are removed on
-  update, so automations using them need the select instead.)
+  **Record only** or **Download**, offering only what the field can do (see **Field
+  modes** for which options appear and why). Changing it saves the configuration and
+  the site reloads to apply it, which takes a few seconds. (Before 0.1.7 these were
+  *Send <field>* switches; they are removed on update, so automations using them need
+  `select.select_option` instead.)
 - **Download sensors**, one per downloaded field (*v2 Power from PVOutput*), plus
   **Normalised output from PVOutput**.
 - **Clear queued history** button (under Controls, next to Uploading): takes the waiting history off the queue (statuses
