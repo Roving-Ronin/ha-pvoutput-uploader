@@ -653,11 +653,6 @@ class PVOutputUploaderOptionsFlow(OptionsFlow):
                 ),
             }
         )
-        if uploader.sends_battery:
-            # Only then is there a choice: battery values need one request each.
-            schema = schema.extend(
-                {vol.Required(ATTR_WITHOUT_BATTERY, default=False): BooleanSelector()}
-            )
         defaults = user_input or {
             ATTR_FROM: FROM_FAILURE if first_unsent is not None else FROM_TIME,
             ATTR_START: (today - timedelta(days=1)).strftime("%Y-%m-%d 00:00:00"),

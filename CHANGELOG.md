@@ -2,6 +2,7 @@
 
 ## 0.1.6b3
 
+- **Battery fields go in batches.** Statuses with b1-b6 are sent in batches like the others (up to 100 per request for donors), as six columns after `v12`, instead of one request per status: a 3-week backlog takes about 61 requests instead of about 6,000. PVOutput documents battery fields only for single statuses; a test batch with them was accepted. If battery values are missing in PVOutput after an upload, please report it. The **Leave out battery fields** tick box is removed from Reupload history as it no longer saves time (`without_battery` on the action still works).
 - **Clear queued history** button on the PV site: takes the waiting history off the queue (statuses older than the last two upload intervals, and queued daily totals) and ends a "leave out battery fields" run, while current statuses keep going. Nothing is deleted: cleared statuses stay in the log as unsent, counted in the new **Cleared samples** sensor, and **Reupload history** (also since the first unsent status) sends them again.
 - Removed a stray `config_flow.py.bak` that had been shipped since 0.1.5.
 

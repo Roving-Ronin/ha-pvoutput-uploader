@@ -16,9 +16,8 @@ to [PVOutput](https://pvoutput.org), with local recording and automatic upload r
    Available fields depend on donor status; see **How it works → Donor features** for details.
    For sensors without a unit, enter **Source / custom unit** when prompted.
 4. Optional: **Configure → Import history from Home Assistant** to fill the log for the
-   days before installing, and send them. For a large backlog with battery fields,
-   **Reupload history → Leave out battery fields (much faster)** uploads the other
-   readings in batches; see [Reupload history](#reupload-history) for details.
+   days before installing, and send them. Statuses go up to 100 per request (donor),
+   battery fields included, so weeks of history take minutes.
 
 If you already send to PVOutput with a `rest_command` automation, switch it off once the
 fields are added, so statuses are not sent twice.
@@ -237,33 +236,16 @@ statuses, and when the first unsent one is. Start:
 - *Daily totals only*: daily outputs (generation, consumption, peak power, min/max
   temperature); these replace the day's totals in PVOutput
 
-### Faster history uploads without battery fields
+Battery fields (`b1`–`b6`) go in the same batches as the other fields, up to 100
+statuses per request for donors, so three weeks of 5 minute statuses (6,048) take about
+61 requests. PVOutput's documentation lists battery fields only for single statuses;
+the batch service accepts them as six more columns after `v12` (a test batch was
+accepted). Check the battery chart in PVOutput after the first batches: if battery
+values are missing there, report it, as PVOutput would then be dropping them.
 
-**Leave out battery fields (much faster)** is an optional checkbox under
-**Configure → Reupload history**, available when the site sends battery fields.
-It is off by default.
-
-PVOutput's batch service does not support battery fields (`b1`–`b6`). With battery
-values included, each status needs its own request: three weeks of 5 minute statuses
-are 6,048 requests, or about 20 hours at the donor allowance of 300 requests an hour.
-Ticking this option leaves battery values out of the historical uploads, allowing up
-to 100 statuses per donor batch. The same period can then take minutes, depending on
-the remaining API allowance, retries and other uploads.
-
-- It applies to **all waiting statuses up to the moment you submit**, including an
-  existing backlog outside the period you selected for reupload.
-- Battery readings stay in the local history log; only the outgoing battery fields
-  are omitted. Statuses containing only battery readings are skipped.
-- New statuses after submission include battery values as usual. The temporary batch
-  mode survives integration restarts until the backlog is finished.
-- To add the battery values later, reupload **the same date range** with the checkbox
-  cleared. Use **From a date and time**, because the earlier batch uploads already
-  count as sent. Battery uploads then need one request per status again, and the
-  period must still be within PVOutput's status history window.
-
-For scripts and automations, set `without_battery: true` on the
-`pvoutput_uploader.reupload` action; omit it or use `false` for a normal reupload.
-This option changes status uploads, not daily totals.
+For scripts and automations, `without_battery: true` on the `pvoutput_uploader.reupload`
+action sends everything waiting up to that moment without battery values. It is no
+longer needed for speed and is kept for compatibility.
 
 Sending runs in the background at the pace the hourly request limit allows (60 requests
 an hour, 300 for donors). The **Samples waiting** and **Daily outputs waiting** sensors
@@ -279,13 +261,6 @@ the log are kept unless *Replace recorded values* is on.
 
 With *Send to PVOutput* on, the imported period is sent like any backlog; with it off it
 is only stored, ready for a later reupload.
-
-For a large historical import with battery fields, leave *Send to PVOutput* off,
-then open **Reupload history**, select the imported date range and tick
-**Leave out battery fields (much faster)**. This sends the other readings in batches;
-you can reupload that range later with the checkbox cleared to add the battery values.
-See [Faster history uploads without battery fields](#faster-history-uploads-without-battery-fields)
-for the scope and limits of this option.
 
 **Historical uploads in progress.** This example shows 4,935 stored history samples,
 with 4,657 still waiting to upload. The diagnostics show progress as the backlog is sent.
@@ -322,10 +297,9 @@ with 4,657 still waiting to upload. The diagnostics show progress as the backlog
   If you become a PVOutput donor later, reload the integration to make extended
   parameters (`v7`–`v12`) and battery fields (`b1`–`b6`) available, or select
   **Donor** manually under Account type.
-- **Battery fields** are not accepted by PVOutput's batch service, so while any battery
-  field is active each status is sent with its own request. For a faster historical
-  upload, **Reupload history → Leave out battery fields (much faster)** temporarily
-  omits battery values from the backlog so the other fields can be batched.
+- **Battery fields** go in the same batches as the other fields, as six columns after
+  `v12` (b1-b6). PVOutput documents them only for single statuses; its batch service
+  accepts the extra columns, which is not documented.
 
 ## Entities
 

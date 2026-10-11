@@ -285,9 +285,10 @@ async def test_field_sensors(recorder_mock, hass: HomeAssistant, entry: MockConf
     assert await hass.config_entries.async_unload(entry.entry_id)
 
 
-async def test_reupload_offers_without_battery_only_with_battery(
+async def test_reupload_has_no_battery_box(
     recorder_mock, hass: HomeAssistant, entry: MockConfigEntry
 ) -> None:
+    """Battery values are batched, so leaving them out gains nothing."""
     b1 = {
         "field": "b1", "entity_id": "sensor.battery_power", "constant": None,
         "name": "Battery Power", "active": True, "aggregate": "average",
@@ -302,25 +303,7 @@ async def test_reupload_offers_without_battery_only_with_battery(
     result = await hass.config_entries.options.async_configure(
         result["flow_id"], {"next_step_id": "reupload"}
     )
-    assert "without_battery" in [str(k) for k in result["data_schema"].schema]
-    uploader = entry.runtime_data.uploader
-    with patch.object(
-        uploader,
-        "async_reupload",
-        AsyncMock(return_value={"status_days": 1, "output_days": 0}),
-    ) as reupload:
-        result = await hass.config_entries.options.async_configure(
-        result["flow_id"],
-        {
-            "from": "from_time",
-            "start": f"{dt_util.now().date().isoformat()} 00:00:00",
-            "end": dt_util.now().date().isoformat(),
-            "method": "statuses",
-            "without_battery": True,
-        },
-        )
-    assert result["reason"] == "reupload_queued"
-    assert reupload.call_args.kwargs == {"without_battery": True}
+    assert "without_battery" not in [str(k) for k in result["data_schema"].schema]
 
     assert await hass.config_entries.async_unload(entry.entry_id)
 

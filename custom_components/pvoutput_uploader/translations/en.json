@@ -136,11 +136,9 @@
           "from": "Start",
           "start": "Date and time",
           "end": "To",
-          "method": "Send as",
-          "without_battery": "Leave out battery fields (much faster)"
+          "method": "Send as"
         },
         "data_description": {
-          "without_battery": "Battery values (b1-b6) cannot be batched, so with them each status takes its own request and PVOutput allows about 300 an hour: three weeks of 5 minute statuses take about 20 hours. Ticked, everything waiting up to now is sent in batches of 100 without battery values, in minutes. Statuses that hold only battery values are skipped. New statuses keep their battery values, and reuploading the same period again without this box sends the battery values too.",
           "start": "Used with \"From a date and time\".",
           "end": "Last day to send. Defaults to today.",
           "method": "Statuses keep every interval; daily totals replace the day's totals in PVOutput."
@@ -304,7 +302,7 @@
         },
         "without_battery": {
           "name": "Without battery",
-          "description": "Send everything waiting up to now in batches without battery values (b1-b6): minutes instead of one request per status. Reupload again without it to add the battery values."
+          "description": "Send everything waiting up to now without battery values (b1-b6). No longer needed for speed, as battery values are batched too; kept for compatibility."
         },
         "since_failure": {
           "name": "Since first unsent",

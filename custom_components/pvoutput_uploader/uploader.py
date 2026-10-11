@@ -93,8 +93,13 @@ REJECTED_VALUE_FIELDS = (
     ("moon powered", ("v1", "v2")),
 )
 
-# Status fields addbatchstatus.jsp accepts, in its column order.
-BATCH_KEYS = tuple(f"v{n}" for n in range(1, 13))
+# Status fields in addbatchstatus.jsp's column order. The battery fields b1-b6
+# follow v12; PVOutput takes them in batches although its documentation lists
+# them only for addstatus.jsp.
+BATCH_KEYS = (
+    *(f"v{n}" for n in range(1, 13)),
+    *(f"b{n}" for n in range(1, 7)),
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -429,8 +434,8 @@ class Uploader:
                 if not self._rate_ok(RATE_RESERVE):
                     return
                 without_battery = False
-                single = battery
-                slots = current[: 1 if single else self._batch_limit]
+                single = False
+                slots = current[: self._batch_limit]
             else:
                 # History: oldest first, and only while the backlog reserve allows.
                 if not self._rate_ok(self._history_reserve()):
@@ -444,8 +449,8 @@ class Uploader:
                         # The batch backlog is done; back to the normal way.
                         no_battery_until = None
                         await self._run(self.store.set_meta, META_NO_BATTERY_UNTIL, None)
-                single = battery and not without_battery
-                limit = 1 if single else self._batch_limit
+                single = False
+                limit = self._batch_limit
                 slots = await self._pending_slots(
                     window,
                     min(last_built, no_battery_until) if without_battery else last_built,

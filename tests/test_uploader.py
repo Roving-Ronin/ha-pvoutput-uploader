@@ -94,6 +94,14 @@ class FakeClient:
         return ""
 
 
+def line(time: str, day: str = "20261010", **values: str) -> str:
+    """Build the batch line PVOutput gets: v1-v12, then b1-b6, trailing empties trimmed."""
+    cols = [values.get(k, "") for k in uploader_module.BATCH_KEYS]
+    while cols and not cols[-1]:
+        cols.pop()
+    return ",".join([day, time, *cols])
+
+
 def field(key: str, entity: str | None = "sensor.x", **extra: Any) -> dict[str, Any]:
     return {"field": key, "entity_id": entity, "active": True} | extra
 
@@ -242,7 +250,7 @@ async def test_passive_and_donor_fields_are_not_sent(
     ]
 
 
-async def test_battery_fields_go_one_by_one(
+async def test_battery_fields_are_batched(
     hass: HomeAssistant, tmp_path: Path, now: FrozenDateTimeFactory
 ) -> None:
     up = await make(
@@ -265,12 +273,13 @@ async def test_battery_fields_go_one_by_one(
         last_built=local_ts(10, 10, 10, 15),
     )
     await up._async_upload_statuses()
-    assert up.client.batches == []
-    # 10:15 is current and goes first; 10:05 is older.
-    assert up.client.singles == [
-        {"d": "20261010", "t": "10:15", "b1": "100", "b3": "5544"},
-        {"d": "20261010", "t": "10:05", "v5": "20", "b1": "-250", "b2": "81.2", "b3": "5544"},
+    assert up.client.singles == []
+    # Battery values go in batches, after v12. 10:15 is current and goes first.
+    assert up.client.batches == [
+        [line("10:15", b1="100", b3="5544")],
+        [line("10:05", v5="20", b1="-250", b2="81.2", b3="5544")],
     ]
+    assert up.client.batches[1][0] == "20261010,10:05,,,,,20,,,,,,,,-250,81.2,5544"
     assert set((await states(up, 0, 2**40)).values()) == {DONE}
 
 
@@ -755,9 +764,9 @@ async def test_requests_are_spaced(
 
     with patch.object(uploader_module, "_sleep", side_effect=fake_sleep):
         await up._async_upload_statuses()
-    # Battery fields: one request per status, the second and third wait.
-    assert len(up.client.singles) == 3
-    assert len(waits) == 2
+    # The two current statuses in one batch, then the older one: the second waits.
+    assert len(up.client.batches) == 2
+    assert len(waits) == 1
     assert all(4 < w <= 5 for w in waits)
 
 
@@ -788,7 +797,8 @@ async def test_fixed_battery_state_is_sent(
     ts = local_ts(10, 10, 10, 5)
     await add(up, Sample(ts, {"b1": -250.0}), last_built=ts)
     await up._async_upload_statuses()
-    assert up.client.singles == [{"d": "20261010", "t": "10:05", "b1": "-250", "b6": "3"}]
+    assert up.client.batches == [[line("10:05", b1="-250", b6="3")]]
+    assert up.client.singles == []
 
 
 async def test_backlog_without_battery(
@@ -818,7 +828,8 @@ async def test_backlog_without_battery(
     await add(up, Sample(ts, {"v5": 22.0, "b1": -400.0}), last_built=ts)
     now.move_to(local_dt(10, 10, 10, 30))
     await up._async_upload_statuses()
-    assert up.client.singles == [{"d": "20261010", "t": "10:25", "v5": "22", "b1": "-400"}]
+    assert up.client.batches[-1] == [line("10:25", v5="22", b1="-400")]
+    assert up.client.singles == []
 
 
 async def test_reupload_with_battery_clears_the_batch_mode(
@@ -831,8 +842,8 @@ async def test_reupload_with_battery_clears_the_batch_mode(
     # Changed your mind: a normal reupload sends the battery values again.
     await up.async_reupload(local_dt(10, 10), date(2026, 10, 10), "statuses")
     await up._async_upload_statuses()
-    assert up.client.batches == []
-    assert up.client.singles == [{"d": "20261010", "t": "10:05", "v5": "20", "b1": "-100"}]
+    assert up.client.batches == [[line("10:05", v5="20", b1="-100")]]
+    assert up.client.singles == []
 
 
 async def test_without_battery_needs_battery_fields(
@@ -880,7 +891,7 @@ async def test_current_statuses_go_before_history(
     await up._async_upload_statuses()
 
     # Only the current status goes; history waits for the next hour.
-    assert up.client.singles == [{"d": "20261010", "t": "10:15", "v5": "21", "b1": "-200"}]
+    assert up.client.batches == [[line("10:15", v5="21", b1="-200")]]
     st = await states(up, 0, 2**40)
     assert [st[t] for t in old] == [PENDING, PENDING, PENDING]
 
