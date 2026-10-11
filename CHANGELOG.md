@@ -1,20 +1,19 @@
 # Changelog
 
+## 0.1.8b3
+
+- **Daily history download checkpoints each day it fetches**, so a pass stopped by the hourly limit does not ask for the same days again, and the two previous days are fetched again only once, when a new day arrives.
+- Tests for daylight saving days (Sydney: the 23 hour day in October, the 25 hour day in April): every hour lies in its day, none twice, and energy adds up to PVOutput's day total.
+
 ## 0.1.8b2
 
-- **Late statuses reach the history:** each day the daily download also fetches the two days before yesterday again (three requests a day), so statuses that reached PVOutput late (another uploader catching up, a reupload) replace what was downloaded first. Each day fetched is checkpointed, so a pass stopped by the hourly limit does not ask for the same days again.
-- **Hours without statuses:** energy counted over hours PVOutput has no statuses for (a gap, or midnight to the first status) is shared evenly by those hours and the next hour with a status, instead of all landing in that next hour. The day's total stays exact; the README says which hours are estimates.
-- **Long history downloads rebuild the statistics every 30 days with detail and at the end**, not after every batch of ten days; a pending rebuild survives restarts.
-- Tests for daylight saving days (23 and 25 hour days, Sydney): every hour lies in its day, none twice, and energy adds up to PVOutput's day total.
-
-## 0.1.8b1
-
-**PVOutput history in Home Assistant statistics.**
+**PVOutput history in Home Assistant statistics.** First beta of it: 0.1.8b1 failed its checks and was not released, so this includes everything planned for it.
 
 - Every column PVOutput has (v1-v12, normalised output) is kept as hourly statistics, *... (PVOutput history)* (`pvoutput_uploader:<system id>_<field>`), whatever the fields are set to: energy as hourly totals, the rest as hourly mean, min and max. Shown in statistics graphs and the Energy dashboard.
-- **Daily history download** switch (Controls, on by default): yesterday is added every day after 02:00 with one request, catching up on up to 30 missed days.
-- **Configure → Download history from PVOutput** (From, To): checks first how far back PVOutput has statuses and says so when the start has none; then fetches day by day in the background at the pace the hourly limit allows. Progress and result in the new **History download days left** sensor.
+- **Daily history download** switch (Controls, on by default): yesterday is added every day after 02:00, catching up on up to 30 missed days. The two days before yesterday are fetched again too (three requests a day), so statuses that reached PVOutput late (another uploader catching up, a reupload) replace what was downloaded first.
+- **Configure → Download history from PVOutput** (From, To): checks first how far back PVOutput has statuses and says so when the start has none; then fetches day by day in the background at the pace the hourly limit allows. Progress and result in the new **History download days left** sensor. Long downloads rebuild the statistics every 30 days with detail and at the end; a pending rebuild survives restarts.
 - Days PVOutput has statuses for replace what was downloaded before; days without keep it.
+- **Hours without statuses:** energy counted over hours PVOutput has no statuses for (a gap, or midnight to the first status) is shared evenly by those hours and the next hour with a status. The day's total stays exact; the README says which hours are estimates.
 - **Download fields get their past**: a *from PVOutput* sensor's statistics are filled from the history for the hours before its own begin, never rewriting recorded hours, with energy totals lined up (no jump).
 - **Downloading** switch (while a field is in Download mode) stops the live reads.
 - Removing a site deletes its PVOutput history statistics.
