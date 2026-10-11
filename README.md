@@ -350,6 +350,8 @@ normalised output, named e.g. *My System v2 Power Generation (PVOutput history)*
   Statuses can reach PVOutput late (another uploader catching up after an outage, or
   a reupload), so each day the two days before yesterday are fetched again too: three
   requests a day. Anything later than that needs a **Download history** of those days.
+  Each day fetched is noted at once, so when the hourly limit stops a pass, the next
+  one asks only for the days still missing.
 - **Further back:** **Configure → Download history from PVOutput** with From and To (up
   to yesterday). It first checks how far back PVOutput has statuses: if the start has
   none, you are told the first day it has, and only that part is downloaded. The days
@@ -365,8 +367,8 @@ normalised output, named e.g. *My System v2 Power Generation (PVOutput history)*
   sensor's own statistics begin. Hours Home Assistant recorded itself are never
   rewritten, and energy totals are lined up so the Energy dashboard shows no jump where
   the two meet.
-- **Removing the site** deletes its PVOutput history statistics (the history log file
-  stays, as before). Turning the switch off only stops new days; what is there stays.
+- **Removing the site** deletes its PVOutput history statistics and the hourly copy
+  in the history log (the log file itself stays, for a site added again). Turning the switch off only stops new days; what is there stays.
 - **Time zone:** PVOutput's status times are read in Home Assistant's time zone, which
   should match the system's time zone in PVOutput. On daylight saving days the hours
   follow the clock change: the day has 23 or 25 hours. PVOutput keys statuses by local
