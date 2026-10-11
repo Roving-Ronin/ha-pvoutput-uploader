@@ -4,6 +4,7 @@
 
 - **Last upload no longer resets to Unknown** after a restart or reload (e.g. changing a field's select): it is kept in the log database.
 - **Last download** diagnostic sensor, while any field downloads: when PVOutput was last read successfully. Also kept across restarts.
+- **Last upload is shown only while a field can be uploaded** (Send or Record only with a sensor or fixed value); a download-only site has Last download instead.
 - README: one **Field modes** section explaining sources, the three modes, which options the selects offer and why, and switching between upload and download.
 
 ## 0.1.7b3

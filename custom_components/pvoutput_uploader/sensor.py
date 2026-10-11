@@ -157,14 +157,24 @@ async def async_setup_entry(
             PVOutputSensor(coordinator, EFFICIENCY),
             PVOutputSensor(coordinator, LAST_DOWNLOAD),
         ]
-    # Drop the sensors of removed fields, and download sensors no longer needed.
-    wanted = {sensor.unique_id for sensor in (*fields, *downloads)}
+    # Last upload only while a field can be uploaded (Send or Record only, with
+    # a sensor or fixed value): a download-only site never uploads.
+    uploads = any(not m.download and m.has_source for m in uploader.mappings)
+    status = [
+        PVOutputSensor(coordinator, description)
+        for description in SENSORS
+        if uploads or description.key != "last_upload"
+    ]
+    # Drop the sensors of removed fields, and download or upload sensors no
+    # longer needed.
+    wanted = {sensor.unique_id for sensor in (*fields, *downloads, *status)}
     sid = entry.data[CONF_SYSTEM_ID]
     managed = (
         f"{sid}_field_",
         f"{sid}_download_",
         f"{sid}_normalised_output",
         f"{sid}_last_download",
+        f"{sid}_last_upload",
     )
     registry = er.async_get(hass)
     for reg_entry in er.async_entries_for_config_entry(registry, entry.entry_id):
@@ -178,7 +188,7 @@ async def async_setup_entry(
         [
             *fields,
             *downloads,
-            *(PVOutputSensor(coordinator, description) for description in SENSORS),
+            *status,
         ]
     )
 

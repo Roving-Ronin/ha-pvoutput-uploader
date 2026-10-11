@@ -513,3 +513,45 @@ async def test_extended_download_needs_donor(
         assert v7.attributes["not_downloaded_because"] == "needs a PVOutput donor account"
 
     assert await hass.config_entries.async_unload(entry.entry_id)
+
+
+async def test_last_upload_only_when_something_uploads(
+    recorder_mock, hass: HomeAssistant, entry: MockConfigEntry
+) -> None:
+    download = {
+        "field": "v2", "entity_id": None, "constant": None, "name": "Power",
+        "active": True, "aggregate": "average", "direction": "download",
+    }
+    upload = {
+        "field": "v5", "entity_id": "sensor.outside", "constant": None,
+        "name": "Ambient", "active": False, "aggregate": "average",
+    }
+    hass.config_entries.async_update_entry(
+        entry, options=dict(entry.options) | {"fields": [download]}
+    )
+    reading = StatusReading("20261011", "12:00", {"v2": 1500.0}, 0.25)
+    with (
+        patch(GET_SYSTEM, AsyncMock(return_value=SystemInfo("My System", 5, False))),
+        patch(GET_STATUS, AsyncMock(return_value=reading)),
+    ):
+        await _setup(hass, entry)
+        # Download only: no Last upload, but Last download.
+        assert hass.states.get("sensor.my_system_last_upload") is None
+        assert hass.states.get("sensor.my_system_last_download") is not None
+
+        # A field that can be uploaded (Record only counts: reuploads send it).
+        hass.config_entries.async_update_entry(
+            entry, options=dict(entry.options) | {"fields": [download, upload]}
+        )
+        await hass.async_block_till_done(wait_background_tasks=True)
+        assert hass.states.get("sensor.my_system_last_upload") is not None
+
+        # Upload only: no Last download.
+        hass.config_entries.async_update_entry(
+            entry, options=dict(entry.options) | {"fields": [upload]}
+        )
+        await hass.async_block_till_done(wait_background_tasks=True)
+        assert hass.states.get("sensor.my_system_last_download") is None
+        assert hass.states.get("sensor.my_system_last_upload") is not None
+
+    assert await hass.config_entries.async_unload(entry.entry_id)
