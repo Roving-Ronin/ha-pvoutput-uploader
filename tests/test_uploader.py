@@ -180,19 +180,17 @@ async def test_batch_with_energy_since_midnight(
         last_built=local_ts(10, 10, 10, 10),
     )
     await up._async_upload_statuses()
+    # The two current slots go first, then the older one.
     assert up.client.batches == [
-        [
-            "20261010,00:00,5,100,,,20",
-            "20261010,10:05,15,200",
-            "20261010,10:10,35,,,,21",
-        ]
+        ["20261010,10:05,15,200", "20261010,10:10,35,,,,21"],
+        ["20261010,00:00,5,100,,,20"],
     ]
     assert set((await states(up, 0, 2**40)).values()) == {DONE}
     assert up.last_upload is not None
 
     # Nothing left: no further request.
     await up._async_upload_statuses()
-    assert len(up.client.batches) == 1
+    assert len(up.client.batches) == 2
 
 
 async def test_fifteen_minute_interval(
@@ -268,9 +266,10 @@ async def test_battery_fields_go_one_by_one(
     )
     await up._async_upload_statuses()
     assert up.client.batches == []
+    # 10:15 is current and goes first; 10:05 is older.
     assert up.client.singles == [
-        {"d": "20261010", "t": "10:05", "v5": "20", "b1": "-250", "b2": "81.2", "b3": "5544"},
         {"d": "20261010", "t": "10:15", "b1": "100", "b3": "5544"},
+        {"d": "20261010", "t": "10:05", "v5": "20", "b1": "-250", "b2": "81.2", "b3": "5544"},
     ]
     assert set((await states(up, 0, 2**40)).values()) == {DONE}
 
@@ -532,8 +531,11 @@ async def test_only_confirmed_statuses_count_as_sent(
     await up._async_upload_statuses()
     st = await states(up, 0, 2**40)
     assert [st[t] for t in times] == [DONE, PENDING, DONE]
-    # Not resent at once in the same cycle.
-    assert len(up.client.batches) == 1
+    # The current slots, then the older one; 10:10 is not resent in the same cycle.
+    assert up.client.batches == [
+        ["20261010,10:10,,100", "20261010,10:15,,100"],
+        ["20261010,10:05,,100"],
+    ]
 
     # Retried in later cycles, then given up on.
     await up._async_upload_statuses()
@@ -793,19 +795,20 @@ async def test_backlog_without_battery(
     hass: HomeAssistant, tmp_path: Path, now: FrozenDateTimeFactory
 ) -> None:
     up = await make(hass, tmp_path, [field("v5"), field("b1")], donor=True)
-    times = [local_ts(10, 10, 10, m) for m in (5, 10, 15)]
+    # History from an hour ago; nothing current is waiting.
+    times = [local_ts(10, 10, 9, m) for m in (5, 10, 15)]
     await add(
         up,
         Sample(times[0], {"v5": 20.0, "b1": -100.0}, DONE),
         Sample(times[1], {"v5": 21.0, "b1": -200.0}, DONE),
         Sample(times[2], {"b1": -300.0}, DONE),  # battery only
-        last_built=times[-1],
+        last_built=local_ts(10, 10, 10, 15),
     )
     await up.async_reupload(local_dt(10, 10), date(2026, 10, 10), "statuses", without_battery=True)
     await up._async_upload_statuses()
 
     # One batch, no battery values; the battery-only status is skipped.
-    assert up.client.batches == [["20261010,10:05,,,,,20", "20261010,10:10,,,,,21"]]
+    assert up.client.batches == [["20261010,09:05,,,,,20", "20261010,09:10,,,,,21"]]
     assert up.client.singles == []
     assert set((await states(up, 0, 2**40)).values()) == {DONE}
     assert await up._run(up.store.get_meta, "no_battery_until") is None
@@ -856,3 +859,43 @@ async def test_five_requests_are_kept_in_reserve(
     up.client.rate_remaining = 6
     await up._async_upload_statuses()
     assert len(up.client.batches) == 1
+
+
+async def test_current_statuses_go_before_history(
+    hass: HomeAssistant, tmp_path: Path, now: FrozenDateTimeFactory
+) -> None:
+    up = await make(hass, tmp_path, [field("v5"), field("b1")], donor=True)
+    old = [local_ts(10, 9, 12, m) for m in (0, 5, 10)]
+    current = local_ts(10, 10, 10, 15)
+    await add(
+        up,
+        *(Sample(t, {"v5": 20.0, "b1": -100.0}) for t in old),
+        Sample(current, {"v5": 21.0, "b1": -200.0}),
+        last_built=current,
+    )
+    # 20 requests left: below the history reserve (30), above the reserve (5).
+    up.client.rate_remaining = 20
+    up.client.rate_reset = local_ts(10, 10, 11, 0)
+    await up._async_upload_statuses()
+
+    # Only the current status goes; history waits for the next hour.
+    assert up.client.singles == [{"d": "20261010", "t": "10:15", "v5": "21", "b1": "-200"}]
+    st = await states(up, 0, 2**40)
+    assert [st[t] for t in old] == [PENDING, PENDING, PENDING]
+
+
+async def test_history_keeps_its_own_reserve(
+    hass: HomeAssistant, tmp_path: Path, now: FrozenDateTimeFactory
+) -> None:
+    up = await make(hass, tmp_path, [field("v2")])
+    old = local_ts(10, 9, 12, 0)
+    await add(up, Sample(old, {"v2": 100.0}), last_built=local_ts(10, 10, 10, 15))
+    up.client.rate_reset = local_ts(10, 10, 11, 0)
+
+    up.client.rate_remaining = 30
+    await up._async_upload_statuses()
+    assert up.client.batches == []
+
+    up.client.rate_remaining = 31
+    await up._async_upload_statuses()
+    assert up.client.batches == [["20261009,12:00,,100"]]

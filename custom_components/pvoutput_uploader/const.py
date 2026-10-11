@@ -139,6 +139,13 @@ MAX_REQUESTS_PER_CYCLE: Final = 10
 # Requests kept in hand from the hourly limit. The limit belongs to the API key,
 # so this leaves room for other uploaders using the same key (e.g. IoTaWatt).
 RATE_RESERVE: Final = 5
+# History (backlog, reuploads, daily totals) stops while this many requests are
+# left, so current statuses keep going down to RATE_RESERVE: 25 an hour cover a
+# 5 minute site sending battery fields (one request per status), even two.
+BACKLOG_RESERVE: Final = 30
+# The statuses of the last this many upload intervals are current: sent first,
+# before any backlog.
+CURRENT_SLOTS: Final = 2
 # At least this long between PVOutput requests (0.3 s), so a backlog is not sent in a burst.
 REQUEST_SPACING_SECONDS: Final = 0.3
 # A status PVOutput did not confirm (batch status 0, or rejected for lacking v1-v4

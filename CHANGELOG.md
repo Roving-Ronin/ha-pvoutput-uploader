@@ -2,6 +2,8 @@
 
 ## 0.1.6b1
 
+- **Current statuses go first.** The statuses of the last two upload intervals are sent before any history, so live data no longer waits behind a long backlog (it was oldest first).
+- **History stops earlier than live data.** Backlog, reuploads and daily totals stop while 30 requests are left in the hour; current statuses can go on down to the reserve of 5. 25 requests an hour cover a 5 minute site sending battery fields, even two.
 - The last 5 requests of each hour (was 2) are kept in reserve. PVOutput's hourly limit belongs to the API key, so other uploaders using the same key, such as IoTaWatt, keep room while a backlog is sent.
 
 ## 0.1.5

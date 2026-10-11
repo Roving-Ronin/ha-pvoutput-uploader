@@ -60,6 +60,8 @@ from .const import (
     UNCONFIRMED_RETRY_SECONDS,
     OUTPUT_BATCH_DONOR,
     RATE_RESERVE,
+    BACKLOG_RESERVE,
+    CURRENT_SLOTS,
     REQUEST_SPACING_SECONDS,
     SETTLE_SECONDS,
     STATUS_BATCH_DONOR,
@@ -311,7 +313,8 @@ class Uploader:
             await _sleep(wait)
         self._last_request = time.monotonic()
 
-    def _rate_ok(self) -> bool:
+    def _rate_ok(self, reserve: int = BACKLOG_RESERVE) -> bool:
+        """Return whether a request may be made, keeping ``reserve`` requests."""
         now = time.time()
         if self.paused_until is not None:
             if now < self.paused_until:
@@ -320,7 +323,7 @@ class Uploader:
         c = self.client
         if (
             c.rate_remaining is not None
-            and c.rate_remaining <= RATE_RESERVE
+            and c.rate_remaining <= reserve
             and c.rate_reset is not None
             and now < c.rate_reset
         ):
@@ -397,34 +400,43 @@ class Uploader:
         # Statuses PVOutput did not confirm are retried next cycle, not straight away.
         deferred: set[int] = set()
 
+        # Slots ending after this are current: sent first, in the normal way, and
+        # allowed to use the requests the backlog leaves (down to RATE_RESERVE).
+        current_after = max(window, last_built - CURRENT_SLOTS * step + 1)
+
         for _ in range(MAX_REQUESTS_PER_CYCLE):
-            if not self._rate_ok():
-                return
-            without_battery = False
-            if no_battery_until is not None:
-                first = await self._run(self.store.first_pending, window, last_built)
-                if first is not None and _slot_end(first, step) <= no_battery_until:
-                    without_battery = True
-                else:
-                    # The batch backlog is done; back to the normal way.
-                    no_battery_until = None
-                    await self._run(self.store.set_meta, META_NO_BATTERY_UNTIL, None)
-            single = battery and not without_battery
-            limit = 1 if single else self._batch_limit
-            pending = await self._run(
-                self.store.pending_ts,
-                window,
-                last_built,
-                (limit + len(deferred)) * per_slot,
+            current = await self._pending_slots(
+                current_after, last_built, last_built, CURRENT_SLOTS * per_slot, deferred
             )
-            slots: list[int] = []
-            for ts in pending:
-                slot = _slot_end(ts, step)
-                if slot > last_built or (without_battery and slot > no_battery_until):
-                    break
-                if slot not in deferred and (not slots or slots[-1] != slot):
-                    slots.append(slot)
-            slots = slots[:limit]
+            if current:
+                if not self._rate_ok(RATE_RESERVE):
+                    return
+                without_battery = False
+                single = battery
+                slots = current[: 1 if single else self._batch_limit]
+            else:
+                # History: oldest first, and only while the backlog reserve allows.
+                if not self._rate_ok(BACKLOG_RESERVE):
+                    return
+                without_battery = False
+                if no_battery_until is not None:
+                    first = await self._run(self.store.first_pending, window, last_built)
+                    if first is not None and _slot_end(first, step) <= no_battery_until:
+                        without_battery = True
+                    else:
+                        # The batch backlog is done; back to the normal way.
+                        no_battery_until = None
+                        await self._run(self.store.set_meta, META_NO_BATTERY_UNTIL, None)
+                single = battery and not without_battery
+                limit = 1 if single else self._batch_limit
+                slots = await self._pending_slots(
+                    window,
+                    min(last_built, no_battery_until) if without_battery else last_built,
+                    last_built,
+                    (limit + len(deferred)) * per_slot,
+                    deferred,
+                )
+                slots = slots[:limit]
             if not slots:
                 return
 
@@ -471,6 +483,26 @@ class Uploader:
                 self.last_upload = dt_util.utcnow()
                 self.last_error = None
             self._batch_limit = min(self.batch_size, self._batch_limit * 2)
+
+    async def _pending_slots(
+        self, start: int, end: int, last_built: int, rows: int, deferred: set[int]
+    ) -> list[int]:
+        """Return the ends of complete upload slots, at most ``end``, with pending rows.
+
+        Oldest first, leaving out slots retried later (deferred); ``rows`` limits
+        how many 5 minute rows are read from ``start``.
+        """
+        step = self.upload_interval
+        pending = await self._run(self.store.pending_ts, start, last_built, rows)
+        slots: list[int] = []
+        for ts in pending:
+            slot = _slot_end(ts, step)
+            # A slot is complete only once all its rows are recorded.
+            if slot > end or slot > last_built:
+                break
+            if slot not in deferred and (not slots or slots[-1] != slot):
+                slots.append(slot)
+        return slots
 
     async def _send(
         self, entries: list[tuple[int, dict[str, str]]], single: bool
