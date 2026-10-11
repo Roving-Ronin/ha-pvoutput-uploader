@@ -78,6 +78,18 @@ class SampleStore:
             "CREATE TABLE IF NOT EXISTS unconfirmed"
             " (slot INTEGER PRIMARY KEY, since REAL NOT NULL)"
         )
+        # PVOutput history (archive): hourly values per field, and the days
+        # fetched (detail 1: PVOutput had statuses, 0: it had none).
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS archive ("
+            " hour INTEGER NOT NULL, field TEXT NOT NULL,"
+            " mean REAL, min REAL, max REAL, energy REAL,"
+            " PRIMARY KEY (field, hour))"
+        )
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS archive_days"
+            " (day TEXT PRIMARY KEY, detail INTEGER NOT NULL)"
+        )
         conn.commit()
         self._conn = conn
 
@@ -341,6 +353,76 @@ class SampleStore:
         self._executemany(
             "DELETE FROM output_queue WHERE day = ?", [(d,) for d in days]
         )
+
+    # PVOutput history archive
+
+    def archive_replace(
+        self, start: int, end: int, rows: list[tuple[int, str, Any, Any, Any, Any]]
+    ) -> None:
+        """Replace the archive hours in [start, end) with ``rows``.
+
+        Rows are (hour, field, mean, min, max, energy).
+        """
+        assert self._conn is not None
+        with self._lock:
+            self._conn.execute(
+                "DELETE FROM archive WHERE hour >= ? AND hour < ?", (start, end)
+            )
+            self._conn.executemany(
+                "INSERT OR REPLACE INTO archive (hour, field, mean, min, max, energy)"
+                " VALUES (?, ?, ?, ?, ?, ?)",
+                rows,
+            )
+            self._conn.commit()
+
+    def archive_mark_day(self, day: str, detail: bool) -> None:
+        """Note that ``day`` (yyyy-mm-dd) was fetched, and whether it had detail."""
+        self._execute(
+            "INSERT OR REPLACE INTO archive_days (day, detail) VALUES (?, ?)",
+            (day, int(detail)),
+        )
+
+    def archive_last_day(self) -> str | None:
+        """Return the newest day fetched (yyyy-mm-dd)."""
+        return self._execute("SELECT MAX(day) FROM archive_days")[0][0]
+
+    def archive_fields(self) -> list[str]:
+        """Return the fields the archive holds."""
+        return [r[0] for r in self._execute("SELECT DISTINCT field FROM archive")]
+
+    def archive_rows(
+        self, field: str, since: int = 0, until: int | None = None
+    ) -> list[tuple[int, Any, Any, Any, Any]]:
+        """Return (hour, mean, min, max, energy) of a field, oldest first."""
+        return [
+            tuple(r)
+            for r in self._execute(
+                "SELECT hour, mean, min, max, energy FROM archive"
+                " WHERE field = ? AND hour >= ? AND hour < ? ORDER BY hour",
+                (field, since, until if until is not None else 2**62),
+            )
+        ]
+
+    def archive_energy_before(self, field: str, hour: int) -> float:
+        """Return the energy of a field archived before ``hour``."""
+        return self._execute(
+            "SELECT COALESCE(SUM(energy), 0) FROM archive WHERE field = ? AND hour < ?",
+            (field, hour),
+        )[0][0]
+
+    def archive_summary(self) -> dict[str, Any]:
+        """Return the days fetched, with and without detail, and the first day."""
+        first, detail, empty = self._execute(
+            "SELECT MIN(CASE WHEN detail = 1 THEN day END),"
+            " COALESCE(SUM(detail), 0), COUNT(*) - COALESCE(SUM(detail), 0)"
+            " FROM archive_days"
+        )[0]
+        return {"first": first, "days": detail, "empty_days": empty}
+
+    def archive_clear(self) -> None:
+        """Delete the archive (the site is removed)."""
+        self._execute("DELETE FROM archive")
+        self._execute("DELETE FROM archive_days")
 
     # Summary
 

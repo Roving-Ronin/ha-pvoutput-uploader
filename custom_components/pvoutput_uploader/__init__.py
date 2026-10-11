@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import logging
+import os
 
+from homeassistant.components.recorder import get_instance
 from homeassistant.const import CONF_API_KEY, Platform
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ConfigEntryError
@@ -12,6 +14,7 @@ from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.typing import ConfigType
 
 from .api import PVOutputAuthError, PVOutputClient, PVOutputError
+from .archive import ARCHIVE_FIELDS, statistic_id
 from .const import (
     CONF_DETECTED_DONOR,
     CONF_DETECTED_INTERVAL,
@@ -86,3 +89,28 @@ async def async_unload_entry(hass: HomeAssistant, entry: PVOutputConfigEntry) ->
     async with uploader.lock:
         await hass.async_add_executor_job(uploader.store.close)
     return True
+
+
+async def async_remove_entry(hass: HomeAssistant, entry: PVOutputConfigEntry) -> None:
+    """Delete the site's PVOutput history statistics and archive.
+
+    The history log itself stays (it is named after the system ID and serves
+    a site added again); the archive is rebuilt from PVOutput if wanted.
+    """
+    system_id = str(entry.data[CONF_SYSTEM_ID])
+    get_instance(hass).async_clear_statistics(
+        [statistic_id(system_id, field) for field in ARCHIVE_FIELDS]
+    )
+
+    def _clear_archive() -> None:
+        path = hass.config.path(f"pvoutput_uploader_{system_id}.db")
+        if not os.path.exists(path):
+            return
+        store = SampleStore(path)
+        store.open()
+        try:
+            store.archive_clear()
+        finally:
+            store.close()
+
+    await hass.async_add_executor_job(_clear_archive)

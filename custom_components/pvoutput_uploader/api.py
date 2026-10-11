@@ -56,7 +56,7 @@ class StatusReading:
     date: str  # yyyymmdd
     time: str  # hh:mm
     values: dict[str, float | None]  # v1..v12; None where PVOutput has none
-    efficiency: float | None  # normalised output, kWh/kW
+    efficiency: float | None  # normalised output, kW/kW
 
 
 # getstatus.jsp columns after date and time; v7-v12 only with ext=1 (donors).
@@ -85,6 +85,48 @@ def parse_status(text: str) -> StatusReading:
     }
     efficiency = _number(found["efficiency"]) if "efficiency" in found else None
     return StatusReading(cols[0], cols[1], values, efficiency)
+
+
+# getstatus.jsp?h=1 (history) columns after date and time: a different order
+# from the live answer. "efficiency" is kWh/kW so far that day, "normalised"
+# the status's power per kW of system size.
+HISTORY_COLUMNS = (
+    "v1",
+    "efficiency",
+    "v2",
+    "average_power",
+    "normalised",
+    "v3",
+    "v4",
+    "v5",
+    "v6",
+) + tuple(f"v{n}" for n in range(7, 13))
+HISTORY_KEEP = {f"v{n}" for n in range(1, 13)} | {"normalised"}
+
+
+@dataclass(frozen=True, slots=True)
+class HistoryStatus:
+    """One status of a day's history (getstatus.jsp?h=1)."""
+
+    time: str  # hh:mm, local
+    values: dict[str, float]  # v1..v12 and "normalised"; only those PVOutput has
+
+
+def parse_history(text: str) -> list[HistoryStatus]:
+    """Parse a getstatus.jsp history answer, oldest first."""
+    statuses = []
+    for line in text.strip().split(";"):
+        cols = line.strip().split(",")
+        if len(cols) < 3:
+            continue
+        values = {
+            key: value
+            for key, raw in zip(HISTORY_COLUMNS, cols[2:], strict=False)
+            if key in HISTORY_KEEP and (value := _number(raw)) is not None
+        }
+        statuses.append(HistoryStatus(cols[1], values))
+    statuses.sort(key=lambda s: s.time)
+    return statuses
 
 
 class PVOutputClient:
@@ -171,6 +213,23 @@ class PVOutputClient:
         """
         params = {"ext": "1"} if extended else {}
         return parse_status(await self._request("GET", "getstatus.jsp", params))
+
+    async def get_status_history(self, day: str, extended: bool) -> list[HistoryStatus]:
+        """Return every status of ``day`` (yyyymmdd); ``extended`` adds v7-v12.
+
+        A day PVOutput has no statuses for answers "No status found" (HTTP
+        400), returned as an empty list.
+        """
+        params = {"h": "1", "d": day, "limit": "288"}
+        if extended:
+            params["ext"] = "1"
+        try:
+            text = await self._request("GET", "getstatus.jsp", params)
+        except PVOutputBadRequest as err:
+            if "no status" in str(err).lower():
+                return []
+            raise
+        return parse_history(text)
 
     async def add_status(self, params: dict[str, str]) -> str:
         """Send one status, including battery values."""

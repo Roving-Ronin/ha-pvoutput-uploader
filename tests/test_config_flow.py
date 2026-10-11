@@ -149,7 +149,7 @@ async def _add(hass: HomeAssistant, entry: MockConfigEntry, kind: str) -> FlowRe
 async def test_menu(recorder_mock, hass: HomeAssistant) -> None:
     entry = options_entry(hass)
     result = await _menu(hass, entry)
-    assert result["menu_options"] == ["add_field", "reupload", "import_history", "settings"]
+    assert result["menu_options"] == ["add_field", "reupload", "import_history", "download_history", "settings"]
     assert "No fields yet" in result["description_placeholders"]["fields"]
 
 
@@ -176,7 +176,7 @@ async def test_add_sensor_field(recorder_mock, hass: HomeAssistant, sensors) -> 
     result = await _menu(hass, entry)
     assert result["menu_options"] == [
         "add_field", "edit_field", "fields", "remove_field", "reupload",
-        "import_history", "settings",
+        "import_history", "download_history", "settings",
     ]
     assert "Outside" in result["description_placeholders"]["fields"]
     result = await _add(hass, entry, "add_sensor")

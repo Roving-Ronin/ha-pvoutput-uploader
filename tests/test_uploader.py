@@ -20,6 +20,7 @@ from custom_components.pvoutput_uploader import uploader as uploader_module
 from custom_components.pvoutput_uploader.api import (
     PVOutputBadRequest,
     PVOutputRateLimited,
+    HistoryStatus,
     StatusReading,
 )
 from custom_components.pvoutput_uploader.const import (
@@ -67,6 +68,9 @@ class FakeClient:
         # Times (hh:mm) addbatchstatus.jsp answers with status 0 for.
         self.not_added: set[str] = set()
         self.statuses: list[bool] = []
+        # PVOutput history per day (yyyymmdd), and the days asked for.
+        self.history: dict[str, list[HistoryStatus]] = {}
+        self.history_calls: list[str] = []
         self.reading: StatusReading | None = None
 
     def _check(self, kind: str, payload: Any) -> None:
@@ -96,6 +100,11 @@ class FakeClient:
         self._check("batch_output", lines)
         self.batch_outputs.append(lines)
         return ""
+
+    async def get_status_history(self, day: str, extended: bool) -> list[HistoryStatus]:
+        self._check("history", day)
+        self.history_calls.append(day)
+        return self.history.get(day, [])
 
     async def get_status(self, extended: bool) -> StatusReading:
         self._check("get_status", extended)

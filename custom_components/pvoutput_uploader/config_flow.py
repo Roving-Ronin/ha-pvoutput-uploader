@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 from typing import Any
 
 import voluptuous as vol
@@ -20,6 +20,7 @@ from homeassistant.core import callback
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.selector import (
     BooleanSelector,
+    DateSelector,
     DateTimeSelector,
     EntitySelector,
     EntitySelectorConfig,
@@ -174,6 +175,9 @@ class PVOutputUploaderOptionsFlow(OptionsFlow):
         # Modes shown on the Fields page, and fields still needing a source.
         self._shown_modes: dict[str, str] = {}
         self._needs_source: list[tuple[str, str]] = []
+        # A history download whose start PVOutput has no detail for:
+        # (start asked, first day with detail, end).
+        self._history: tuple[date, date, date] | None = None
 
     @property
     def _fields(self) -> list[dict[str, Any]]:
@@ -312,7 +316,7 @@ class PVOutputUploaderOptionsFlow(OptionsFlow):
             fields += "\n\n" + self._all_in_use()
         if self._fields:
             menu += ["edit_field", "fields", "remove_field"]
-        menu += ["reupload", "import_history", "settings"]
+        menu += ["reupload", "import_history", "download_history", "settings"]
         detected = self.config_entry.data.get(CONF_DETECTED_INTERVAL, DEFAULT_INTERVAL_MINUTES)
         return self.async_show_menu(
             step_id="init",
@@ -938,6 +942,99 @@ class PVOutputUploaderOptionsFlow(OptionsFlow):
         )
 
     # Settings
+
+    # PVOutput history
+
+    async def async_step_download_history(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Download PVOutput history (every column) into statistics."""
+        if (uploader := self._uploader()) is None:
+            return self.async_abort(reason="not_loaded")
+        archive = uploader.archive
+        errors: dict[str, str] = {}
+        yesterday = dt_util.now().date() - timedelta(days=1)
+        if user_input is not None:
+            start = date.fromisoformat(user_input[ATTR_START])
+            end = min(
+                date.fromisoformat(user_input[ATTR_END]) if user_input.get(ATTR_END) else yesterday,
+                yesterday,
+            )
+            if end < start:
+                errors["base"] = "end_before_start"
+            elif not uploader._rate_ok():
+                # No requests to spare for probing now: queue it as asked.
+                return await self._queue_history(start, end)
+            else:
+                first = await archive.async_first_detail(start, end)
+                if first is None:
+                    return self.async_abort(
+                        reason="no_history_detail",
+                        description_placeholders={
+                            "start": start.isoformat(),
+                            "end": end.isoformat(),
+                        },
+                    )
+                if first == start:
+                    return await self._queue_history(start, end)
+                self._history = (start, first, end)
+                return await self.async_step_download_history_partial()
+        schema = vol.Schema(
+            {
+                vol.Required(ATTR_START): DateSelector(),
+                vol.Optional(ATTR_END): DateSelector(),
+            }
+        )
+        summary = archive.summary
+        return self.async_show_form(
+            step_id="download_history",
+            data_schema=self.add_suggested_values_to_schema(
+                schema, user_input or {ATTR_END: yesterday.isoformat()}
+            ),
+            description_placeholders={
+                "first": summary.get("first") or "none yet",
+                "days": str(summary.get("days", 0)),
+                "busy": (
+                    f"A download is running ({archive.days_left} days left); a new one replaces it."
+                    if archive.backfill
+                    else ""
+                ),
+            },
+            errors=errors,
+        )
+
+    async def async_step_download_history_partial(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Warn that PVOutput has no detail for the start of the range."""
+        assert self._history is not None
+        start, first, end = self._history
+        if user_input is not None:
+            return await self._queue_history(first, end)
+        return self.async_show_form(
+            step_id="download_history_partial",
+            data_schema=vol.Schema({}),
+            description_placeholders={
+                "start": start.isoformat(),
+                "first": first.isoformat(),
+                "end": end.isoformat(),
+                "missing": str((first - start).days),
+            },
+        )
+
+    async def _queue_history(self, start: date, end: date) -> ConfigFlowResult:
+        uploader = self._uploader()
+        assert uploader is not None
+        await uploader.archive.async_queue(start, end)
+        await self.config_entry.runtime_data.async_request_refresh()
+        return self.async_abort(
+            reason="history_download_queued",
+            description_placeholders={
+                "start": start.isoformat(),
+                "end": end.isoformat(),
+                "days": str((end - start).days + 1),
+            },
+        )
 
     async def async_step_settings(
         self, user_input: dict[str, Any] | None = None

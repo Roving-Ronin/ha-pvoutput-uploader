@@ -51,6 +51,7 @@ class PVOutputSensorDescription(SensorEntityDescription):
     """Describes a status sensor."""
 
     value_fn: Callable[[Uploader], Any]
+    attrs_fn: Callable[[Uploader], dict[str, Any]] | None = None
     available_fn: Callable[[Uploader], bool] = lambda _: True
 
 
@@ -135,7 +136,39 @@ SENSORS = (
         # A recorder problem first: it stays until reading works again.
         value_fn=lambda u: (u.record_error or u.last_error or "")[:255] or None,
     ),
+    PVOutputSensorDescription(
+        key="history_download",
+        entity_category=EntityCategory.DIAGNOSTIC,
+        value_fn=lambda u: u.archive.days_left,
+        attrs_fn=lambda u: _history_attributes(u),
+    ),
 )
+
+
+def _history_attributes(u: Uploader) -> dict[str, Any]:
+    """Describe the PVOutput history archive and the last history download."""
+    archive = u.archive
+    attrs: dict[str, Any] = {
+        "daily_download": archive.enabled,
+        "archive_first_day": archive.summary.get("first"),
+        "archive_days_with_detail": archive.summary.get("days", 0),
+        "archive_days_without_detail": archive.summary.get("empty_days", 0),
+    }
+    if (job := archive.backfill) is not None:
+        attrs |= {
+            "downloading_from": job["next"],
+            "downloading_to": job["end"],
+            "days_with_detail": job["detail"],
+            "days_without_detail": job["empty"],
+        }
+    elif (result := archive.result) is not None:
+        attrs |= {
+            "last_download_days_with_detail": result["detail"],
+            "last_download_days_without_detail": result["empty"],
+            "last_download_finished": result["finished"],
+        }
+    return attrs
+
 
 
 async def async_setup_entry(
@@ -215,6 +248,13 @@ class PVOutputSensor(PVOutputEntity, SensorEntity):
     def native_value(self) -> Any:
         """Return the value."""
         return self.entity_description.value_fn(self.coordinator.uploader)
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any] | None:
+        """Return the description's attributes, if it has any."""
+        if (attrs_fn := self.entity_description.attrs_fn) is None:
+            return None
+        return attrs_fn(self.coordinator.uploader)
 
 
 # What a field's 5 minute values are recorded in.
@@ -408,7 +448,7 @@ class DownloadSensor(PVOutputEntity, SensorEntity):
 
 EFFICIENCY = PVOutputSensorDescription(
     key="normalised_output",
-    native_unit_of_measurement="kWh/kW",
+    native_unit_of_measurement="kW/kW",
     state_class=SensorStateClass.MEASUREMENT,
     value_fn=lambda u: u.fresh_reading.efficiency if u.fresh_reading else None,
     available_fn=lambda u: u.reading_at is None or u.fresh_reading is not None,

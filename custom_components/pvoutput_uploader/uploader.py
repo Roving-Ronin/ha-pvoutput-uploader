@@ -25,6 +25,7 @@ from .api import (
     PVOutputRateLimited,
     StatusReading,
 )
+from .archive import Archive
 from .builder import (
     Source,
     async_build_from_states,
@@ -222,6 +223,8 @@ class Uploader:
             if m.entity_id
         ]
         self.upload_enabled = True
+        # The Downloading switch: live reads for fields in Download mode.
+        self.download_enabled = True
         self.lock = asyncio.Lock()
         self.paused_until: float | None = None
         # Kept in the log database, so a restart or reload does not reset them.
@@ -241,6 +244,7 @@ class Uploader:
         self._batch_limit = self.batch_size
         self.request_spacing = REQUEST_SPACING_SECONDS
         self._last_request = 0.0
+        self.archive = Archive(self)
 
     # Settings
 
@@ -334,6 +338,7 @@ class Uploader:
         paused = await self._run(self.store.get_meta, META_PAUSED_UNTIL)
         if paused:
             self.paused_until = float(paused)
+        await self.archive.async_load()
         for key, attr in ((META_LAST_UPLOAD, "last_upload"), (META_LAST_DOWNLOAD, "last_download")):
             if stored := await self._run(self.store.get_meta, key):
                 setattr(self, attr, dt_util.parse_datetime(stored))
@@ -370,6 +375,12 @@ class Uploader:
             except PVOutputError as err:
                 self.last_error = f"Download: {err}"
                 _LOGGER.warning("PVOutput download failed: %s", err)
+            # PVOutput history (archive): its own switch, and history downloads.
+            try:
+                await self.archive.async_cycle()
+            except PVOutputError as err:
+                self.last_error = f"History download: {err}"
+                _LOGGER.warning("PVOutput history download failed: %s", err)
             await self._async_housekeeping()
             await self._refresh_summary()
 
@@ -397,6 +408,8 @@ class Uploader:
         """Read the latest status for download fields, once per status interval."""
         if not self.download_mappings:
             self.reading = self.reading_at = None
+            return
+        if not self.download_enabled:
             return
         now = time.time()
         if self._downloaded_at is not None and now - self._downloaded_at < self.upload_interval:

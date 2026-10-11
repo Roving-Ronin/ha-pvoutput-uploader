@@ -37,6 +37,7 @@
           "remove_field": "Remove fields",
           "reupload": "Reupload history",
           "import_history": "Import history from Home Assistant",
+          "download_history": "Download history from PVOutput",
           "settings": "Settings"
         }
       },
@@ -214,6 +215,26 @@
           "passive_fields": "With Send to PVOutput on, the ticked passive fields are sent too, for this period only (statuses PVOutput already has are sent again to add them); live statuses keep them off."
         }
       },
+      "download_history": {
+        "title": "Download history from PVOutput",
+        "description": "Reads PVOutput's statuses for the chosen days and keeps every column it has (v1-v12 and normalised output, whatever the fields are set to) as hourly statistics named *... (PVOutput history)*: energy as hourly totals, the rest as hourly mean, min and max. Fields in Download mode also get it in their *from PVOutput* sensor, for the time before the sensor existed. Hours PVOutput has detail for replace what was downloaded before; other hours stay.
+
+The days are read in the background, one request per day, at the pace the hourly limit allows. The **Daily history download** switch already adds yesterday every day.
+
+Downloaded so far: {days} days, from **{first}**. {busy}",
+        "data": {
+          "start": "From",
+          "end": "To"
+        },
+        "data_description": {
+          "start": "PVOutput keeps status detail for a long time (over a year was seen); where it has none, you are told before anything starts.",
+          "end": "Up to yesterday; today is not complete yet."
+        }
+      },
+      "download_history_partial": {
+        "title": "Not all of it has detail",
+        "description": "PVOutput has no statuses for **{start}** to the day before **{first}** ({missing} days), so they cannot be downloaded: those hours stay empty, or keep what was downloaded before. Submit to download **{first}** to **{end}**."
+      },
       "settings": {
         "title": "Settings",
         "description": "PVOutput reports: {detected_account} account, {detected_interval} minute status interval.",
@@ -248,7 +269,9 @@
       "field_unavailable": "{field} was added to this PV site in the meantime, so it was not added again. Open Configure to edit it.",
       "not_loaded": "The integration is not running. Check that it has started, then try again.",
       "reupload_queued": "Queued: {status_days} days as statuses, {output_days} days as daily totals. Progress shows in the Samples waiting and Daily outputs waiting sensors.",
-      "import_done": "Imported {from_states} samples from recorded states and {from_statistics} from statistics."
+      "import_done": "Imported {from_states} samples from recorded states and {from_statistics} from statistics.",
+      "history_download_queued": "Downloading {days} days of PVOutput history ({start} to {end}) in the background. Progress shows in the History download days left sensor.",
+      "no_history_detail": "PVOutput has no statuses between {start} and {end}, so there is nothing to download."
     }
   },
   "selector": {
@@ -338,6 +361,9 @@
       "last_error": {
         "name": "Last error"
       },
+      "history_download": {
+        "name": "History download days left"
+      },
       "normalised_output": {
         "name": "Normalised output from PVOutput"
       }
@@ -359,6 +385,12 @@
     "switch": {
       "uploading": {
         "name": "Uploading"
+      },
+      "downloading": {
+        "name": "Downloading"
+      },
+      "daily_history": {
+        "name": "Daily history download"
       }
     }
   },

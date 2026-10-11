@@ -15,6 +15,7 @@ from custom_components.pvoutput_uploader.api import (
     PVOutputClient,
     PVOutputConnectionError,
     PVOutputRateLimited,
+    parse_history,
     parse_status,
 )
 
@@ -162,3 +163,45 @@ async def test_get_status(hass: HomeAssistant, aioclient_mock: AiohttpClientMock
     method, url, _, _ = aioclient_mock.mock_calls[0]
     assert method == "GET"
     assert url.query["ext"] == "1"
+
+
+# Two statuses as getstatus.jsp?h=1&ext=1 answers, newest first.
+HISTORY = (
+    "20261010,12:10,16084,1.208,9996,9990,0.750,21796,12541,23.0,238.6,51.142,NaN,NaN,0.000,NaN,NaN;"
+    "20261010,12:00,14419,1.083,9997,10002,0.751,19954,11185,22.0,237.6,53.635,NaN,NaN,0.000,NaN,NaN"
+)
+
+
+def test_parse_history() -> None:
+    statuses = parse_history(HISTORY)
+    # Oldest first.
+    assert [s.time for s in statuses] == ["12:00", "12:10"]
+    assert statuses[0].values == {
+        "v1": 14419.0, "v2": 9997.0, "normalised": 0.751, "v3": 19954.0, "v4": 11185.0,
+        "v5": 22.0, "v6": 237.6, "v7": 53.635, "v10": 0.0,
+    }
+    # Without ext=1 the columns end at the voltage.
+    short = parse_history("20260801,18:40,21880,1.643,109,0,0.000,59820,366,NaN,234.1")
+    assert short[0].values == {
+        "v1": 21880.0, "v2": 109.0, "normalised": 0.0, "v3": 59820.0, "v4": 366.0, "v6": 234.1,
+    }
+
+
+async def test_get_status_history(
+    hass: HomeAssistant, aioclient_mock: AiohttpClientMocker
+) -> None:
+    aioclient_mock.get(BASE_URL + "getstatus.jsp", text=HISTORY)
+    statuses = await client(hass).get_status_history("20261010", extended=True)
+    assert len(statuses) == 2
+    _, url, _, _ = aioclient_mock.mock_calls[0]
+    assert url.query["h"] == "1"
+    assert url.query["d"] == "20261010"
+    assert url.query["limit"] == "288"
+    assert url.query["ext"] == "1"
+
+    # A day without statuses is an empty day, not an error.
+    aioclient_mock.clear_requests()
+    aioclient_mock.get(
+        BASE_URL + "getstatus.jsp", status=400, text="Bad request 400: No status found"
+    )
+    assert await client(hass).get_status_history("20250101", extended=False) == []

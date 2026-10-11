@@ -4,7 +4,8 @@
 
 Send your Home Assistant solar, consumption, battery and other numeric sensor readings
 to [PVOutput](https://pvoutput.org), with local recording and automatic upload recovery.
-Fields can also be read back from PVOutput into sensors (download), per field.
+Fields can also be read back from PVOutput into sensors (download), per field, and
+PVOutput's history is kept as hourly Home Assistant statistics.
 
 ## Quick start
 
@@ -21,6 +22,8 @@ Fields can also be read back from PVOutput into sensors (download), per field.
 4. Optional: **Configure → Import history from Home Assistant** to fill the log for the
    days before installing, and send them. Statuses go up to 100 per request (donor),
    battery fields included, so weeks of history take minutes.
+5. Optional: **Configure → Download history from PVOutput** to bring PVOutput's past
+   into Home Assistant statistics. From then on, yesterday is added every day by itself.
 
 If you already send to PVOutput with a `rest_command` automation, switch it off once the
 fields are added, so statuses are not sent twice.
@@ -54,6 +57,7 @@ service of the IoTaWatt firmware, any period in the log can also be sent again.
 | **History log** (`pvoutput_uploader_<system id>.db` in the configuration folder) | 5 minute values of every configured sensor (Send and Record only fields, and the kept sensor of Download fields), temperatures included | **91 days** by default (*Settings → Keep history for*): the 90 days donors can send statuses for, plus today | Everything that is sent and reuploaded |
 | Home Assistant **recorder** states | Every state change of the sensors | `purge_keep_days` of the recorder (10 days by default) | Feeding the log every minute, and catching up after the integration was not running |
 | Home Assistant **long term statistics** | Hourly mean/min/max, or energy change, of sensors that have a `state_class` | Forever | Only **Import history**, for periods the log never recorded |
+| **PVOutput history** (Home Assistant statistics named *… (PVOutput history)*, and an hourly copy in the history log) | Every column PVOutput has, hourly | Forever, until the site is removed | Looking back at what PVOutput holds; filling download sensors' past |
 
 The log is part of Home Assistant backups, and it survives removing and re-adding the
 integration (it is named after the PVOutput system ID).
@@ -162,6 +166,8 @@ Each action saves as soon as it is submitted.
   date and time.
 - **Import history from Home Assistant**: fill the log from the recorder for a past
   period.
+- **Download history from PVOutput**: read PVOutput's history for a period into
+  statistics (see **PVOutput history** below).
 - **Settings**: account type, upload interval, history retention, daily output fallback.
 
 ### Fields
@@ -296,11 +302,12 @@ them into Home Assistant, while this integration sends temperature and battery.
 
 A field in **Download** mode is read from PVOutput instead of sent: its latest value
 (`getstatus.jsp`) lands in a sensor named *<field> <label> from PVOutput*, e.g.
-*v2 Power from PVOutput*, next to a **Normalised output from PVOutput** sensor (kWh/kW)
-present while any field downloads.
+*v2 Power from PVOutput*, next to a **Normalised output from PVOutput** sensor (kW per
+kW of system size) present while any field downloads.
 
-- **When:** once per upload interval, whether or not **Uploading** is on. Each read is
-  one request from the hourly limit, keeping the same reserve as uploads.
+- **When:** once per upload interval, whether or not **Uploading** is on, while the
+  **Downloading** switch is on. Each read is one request from the hourly limit, keeping
+  the same reserve as uploads.
 - **Values:** energy fields (v1, v3) count Wh since local midnight, so they work in the
   Energy dashboard. A value PVOutput does not have shows as unknown, not 0.
 - **Freshness:** if reads keep failing (PVOutput or the network down, rate limit), the
@@ -313,8 +320,48 @@ present while any field downloads.
   **Extended fields (v7-v12)** are returned to donors only. If the account stops being a
   donor, a v7-v12 download field stays configured but shows unknown, with the attribute
   `not_downloaded_because: needs a PVOutput donor account`.
-- Download is the live value only; reading PVOutput history into statistics may come
-  later.
+- **History:** a download sensor records every reading from the moment it exists; its
+  past is filled from **PVOutput history** below.
+
+## PVOutput history
+
+PVOutput keeps every status it was sent, for a long time (more than a year on a donor
+account in our tests). The integration keeps that history as **hourly Home Assistant
+statistics**, one per column PVOutput has, whatever the fields are set to: v1-v12 and
+normalised output, named e.g. *My System v2 Power Generation (PVOutput history)*
+(statistic `pvoutput_uploader:<system id>_v2`).
+
+- **Hourly:** Home Assistant takes past data only as hourly statistics. Energy (v1, v3,
+  and v7-v12 set up as energy since midnight) becomes each hour's exact total, from
+  PVOutput's running total; everything else the hour's mean, min and max over its 5 or
+  10 minute statuses, so short peaks still show as the hour's max. Recent detail is in
+  the download sensors' own history.
+- **Where it shows:** statistics graph cards and the Energy dashboard (they can pick
+  statistics that have no entity), and **Developer tools → Statistics**. There is no
+  entity and no current state: for a live value set the field to Download.
+- **Daily, by itself:** the **Daily history download** switch (on by default, under
+  Controls) fetches yesterday every day after 02:00, one request, and catches up on up to
+  30 missed days after a stop. So the history keeps growing even if nobody ever opens the
+  menu.
+- **Further back:** **Configure → Download history from PVOutput** with From and To (up
+  to yesterday). It first checks how far back PVOutput has statuses: if the start has
+  none, you are told the first day it has, and only that part is downloaded. The days
+  are fetched in the background, one request per day, using what the hourly limit leaves
+  after live statuses (like reuploads); the **History download days left** sensor shows
+  the progress, its attributes the result (days with and without detail). A new
+  download replaces one still running.
+- **Newer data wins:** a day PVOutput has statuses for replaces what was downloaded for
+  it before (PVOutput data may have been corrected); a day it has none for keeps what
+  was there.
+- **Download fields get their past:** when a field is set to Download, its *from
+  PVOutput* sensor's statistics are filled from this history, for the hours before the
+  sensor's own statistics begin. Hours Home Assistant recorded itself are never
+  rewritten, and energy totals are lined up so the Energy dashboard shows no jump where
+  the two meet.
+- **Removing the site** deletes its PVOutput history statistics (the history log file
+  stays, as before). Turning the switch off only stops new days; what is there stays.
+- **Time zone:** PVOutput's status times are read in Home Assistant's time zone, which
+  should match the system's time zone in PVOutput.
 
 ## Reupload history
 
@@ -421,6 +468,10 @@ with 4,657 still waiting to upload. The diagnostics show progress as the backlog
   v7-v12 on donor accounts) once per upload interval, independently of uploading, and
   paced and rate limited like uploads. Readings are kept in memory only; see
   **Download** above for freshness and errors.
+- **PVOutput history** is read with `getstatus.jsp?h=1` (a whole day per request, up to
+  288 statuses), rolled up to hours in the history log (`archive` table) and imported
+  as external statistics; changed days rebuild the statistics from the first changed
+  hour on, so energy totals stay continuous.
 
 ## Entities
 
@@ -446,7 +497,12 @@ The PVOutput system's device page shows what is uploaded and as what:
   modes** for which options appear and why). Changing it saves the configuration and
   the site reloads to apply it, which takes a few seconds. Automations use
   `select.select_option`.
-- **Uploading** switch: stops sending while recording carries on. Downloads continue.
+- Switches, under Controls, all kept across restarts:
+  - **Uploading**: stops sending while recording carries on. Downloads continue.
+  - **Downloading** (while a field is in Download mode): stops the live reads; the
+    download sensors then turn unavailable once their value is stale.
+  - **Daily history download** (on by default): adds yesterday's PVOutput history to
+    the statistics every day.
 - **Download sensors**, one per field in Download mode (*v2 Power from PVOutput*), plus
   **Normalised output from PVOutput** (unknown while PVOutput has none, e.g. at night
   when nothing is generated). Attributes: `pvoutput_status`, `downloaded_at`, and
@@ -460,7 +516,9 @@ The PVOutput system's device page shows what is uploaded and as what:
   (while any field downloads), both kept across restarts and reloads; samples waiting,
   daily outputs waiting, rejected samples, partly sent samples, cleared samples, sent
   without battery, rejected daily outputs, history size and start, requests left this
-  hour, rate limit pause, account type, last error.
+  hour, rate limit pause, account type, last error, and **History download days left**
+  (attributes: the PVOutput history's first day, days with and without detail, and the
+  progress or result of the last history download).
 
 ## Settings
 

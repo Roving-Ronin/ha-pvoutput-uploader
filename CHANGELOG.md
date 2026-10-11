@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.1.8b1
+
+**PVOutput history in Home Assistant statistics.**
+
+- Every column PVOutput has (v1-v12, normalised output) is kept as hourly statistics, *... (PVOutput history)* (`pvoutput_uploader:<system id>_<field>`), whatever the fields are set to: energy as exact hourly totals, the rest as hourly mean, min and max. Shown in statistics graphs and the Energy dashboard.
+- **Daily history download** switch (Controls, on by default): yesterday is added every day after 02:00 with one request, catching up on up to 30 missed days.
+- **Configure → Download history from PVOutput** (From, To): checks first how far back PVOutput has statuses and says so when the start has none; then fetches day by day in the background at the pace the hourly limit allows. Progress and result in the new **History download days left** sensor.
+- Days PVOutput has statuses for replace what was downloaded before; days without keep it.
+- **Download fields get their past**: a *from PVOutput* sensor's statistics are filled from the history for the hours before its own begin, never rewriting recorded hours, with energy totals lined up (no jump).
+- **Downloading** switch (while a field is in Download mode) stops the live reads.
+- Removing a site deletes its PVOutput history statistics.
+- Normalised output from PVOutput is in kW/kW (was labelled kWh/kW).
+
 ## 0.1.7
 
 Stable release of the 0.1.7 betas (b1-b4): fields can be read from PVOutput as well as sent.

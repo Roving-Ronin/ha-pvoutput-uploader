@@ -31,6 +31,14 @@ from custom_components.pvoutput_uploader.const import (
 )
 
 GET_SYSTEM = "custom_components.pvoutput_uploader.api.PVOutputClient.get_system"
+GET_HISTORY = "custom_components.pvoutput_uploader.api.PVOutputClient.get_status_history"
+
+
+@pytest.fixture(autouse=True)
+def no_history():
+    """PVOutput has no history unless a test says otherwise (no real requests)."""
+    with patch(GET_HISTORY, AsyncMock(return_value=[])) as mock:
+        yield mock
 
 
 @pytest.fixture
@@ -553,5 +561,127 @@ async def test_last_upload_only_when_something_uploads(
         await hass.async_block_till_done(wait_background_tasks=True)
         assert hass.states.get("sensor.my_system_last_download") is None
         assert hass.states.get("sensor.my_system_last_upload") is not None
+
+    assert await hass.config_entries.async_unload(entry.entry_id)
+
+
+async def test_pvoutput_history(
+    recorder_mock, hass: HomeAssistant, entry: MockConfigEntry, no_history
+) -> None:
+    from homeassistant.components.recorder import get_instance
+    from homeassistant.components.recorder.statistics import statistics_during_period
+    from pytest_homeassistant_custom_component.components.recorder.common import (
+        async_wait_recording_done,
+    )
+
+    from custom_components.pvoutput_uploader.api import HistoryStatus
+    from custom_components.pvoutput_uploader.archive import (
+        DAILY_HOUR,
+        day_window,
+        statistic_id,
+    )
+
+    now = dt_util.now()
+    latest = now.date() - timedelta(days=1 if now.hour >= DAILY_HOUR else 2)
+    statuses = [
+        HistoryStatus("10:00", {"v2": 500.0, "v1": 300.0}),
+        HistoryStatus("10:10", {"v2": 700.0, "v1": 400.0}),
+    ]
+    no_history.side_effect = lambda day, extended: (
+        statuses if day == latest.strftime("%Y%m%d") else []
+    )
+    fields = [
+        {
+            "field": "v2", "entity_id": None, "constant": None, "name": "Power",
+            "active": True, "aggregate": "average", "direction": "download",
+        },
+    ]
+    hass.config_entries.async_update_entry(
+        entry, options=dict(entry.options) | {"fields": fields}
+    )
+    reading = StatusReading("20261011", "12:00", {"v2": 1500.0}, 0.25)
+
+    async def hourly(stat: str) -> list[dict]:
+        await async_wait_recording_done(hass)
+        found = await get_instance(hass).async_add_executor_job(
+            statistics_during_period,
+            hass,
+            dt_util.utc_from_timestamp(day_window(latest)[0]),
+            None,
+            {stat},
+            "hour",
+            None,
+            {"mean", "sum"},
+        )
+        return found.get(stat, [])
+
+    with (
+        patch(GET_SYSTEM, AsyncMock(return_value=SystemInfo("My System", 5, False))),
+        patch(GET_STATUS, AsyncMock(return_value=reading)),
+    ):
+        await _setup(hass, entry)
+        assert hass.states.get("switch.my_system_downloading").state == "on"
+        assert hass.states.get("switch.my_system_daily_history_download").state == "on"
+        assert hass.states.get("sensor.my_system_history_download_days_left").state == "0"
+
+        # Yesterday is downloaded, every column as statistics.
+        assert [r["mean"] for r in await hourly(statistic_id("1234", "v2"))] == [500.0, 700.0]
+        assert [r["sum"] for r in await hourly(statistic_id("1234", "v1"))] == [300.0, 400.0]
+        # The download sensor gets it for the time before it existed.
+        sensor = "sensor.my_system_v2_power_from_pvoutput"
+        assert [r["mean"] for r in await hourly(sensor)] == [500.0, 700.0]
+
+        # Removing the site removes its PVOutput history statistics.
+        assert await hass.config_entries.async_remove(entry.entry_id)
+        await hass.async_block_till_done()
+        assert await hourly(statistic_id("1234", "v2")) == []
+
+
+async def test_download_history_from_the_menu(
+    recorder_mock, hass: HomeAssistant, entry: MockConfigEntry, no_history
+) -> None:
+    from custom_components.pvoutput_uploader.api import HistoryStatus
+
+    status = [HistoryStatus("10:00", {"v2": 500.0})]
+    # PVOutput has detail from 1 October 2026 on.
+    no_history.side_effect = lambda day, extended: status if day >= "20261001" else []
+    with patch(GET_SYSTEM, AsyncMock(return_value=SystemInfo("My System", 5, False))):
+        await _setup(hass, entry)
+        archive = entry.runtime_data.uploader.archive
+
+        async def ask(start: str, end: str) -> dict:
+            result = await hass.config_entries.options.async_init(entry.entry_id)
+            result = await hass.config_entries.options.async_configure(
+                result["flow_id"], {"next_step_id": "download_history"}
+            )
+            assert result["step_id"] == "download_history"
+            return await hass.config_entries.options.async_configure(
+                result["flow_id"], {"start": start, "end": end}
+            )
+
+        # All of it has detail: queued straight away.
+        result = await ask("2026-10-02", "2026-10-05")
+        assert result["type"] is FlowResultType.ABORT
+        assert result["reason"] == "history_download_queued"
+        assert result["description_placeholders"]["days"] == "4"
+        await hass.async_block_till_done(wait_background_tasks=True)
+
+        # The start has none: say from when it has, then download that part.
+        result = await ask("2026-09-20", "2026-10-03")
+        assert result["step_id"] == "download_history_partial"
+        assert result["description_placeholders"]["first"] == "2026-10-01"
+        assert result["description_placeholders"]["missing"] == "11"
+        result = await hass.config_entries.options.async_configure(result["flow_id"], {})
+        assert result["reason"] == "history_download_queued"
+        assert result["description_placeholders"]["start"] == "2026-10-01"
+        assert archive.backfill is None or archive.backfill["end"] == "2026-10-03"
+
+        # Nothing at all.
+        result = await ask("2026-08-01", "2026-08-31")
+        assert result["reason"] == "no_history_detail"
+
+        # The end before the start.
+        result = await ask("2026-10-05", "2026-10-01")
+        assert result["errors"] == {"base": "end_before_start"}
 
     assert await hass.config_entries.async_unload(entry.entry_id)
