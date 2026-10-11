@@ -368,7 +368,11 @@ normalised output, named e.g. *My System v2 Power Generation (PVOutput history)*
 - **Removing the site** deletes its PVOutput history statistics (the history log file
   stays, as before). Turning the switch off only stops new days; what is there stays.
 - **Time zone:** PVOutput's status times are read in Home Assistant's time zone, which
-  should match the system's time zone in PVOutput.
+  should match the system's time zone in PVOutput. On daylight saving days the hours
+  follow the clock change: the day has 23 or 25 hours. PVOutput keys statuses by local
+  time, so in the hour that repeats when clocks go back it holds only one status per
+  time; the energy of that hour is then shared with the hour around it, and the day's
+  total stays exact.
 
 ## Reupload history
 

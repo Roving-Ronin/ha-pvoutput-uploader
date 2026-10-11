@@ -287,3 +287,86 @@ async def test_long_history_download_rebuilds_now_and_then(
             imports.clear()
     assert rebuilt == [False, False, True, True]
     assert up.archive.backfill is None
+
+
+async def test_interrupted_daily_pass_does_not_fetch_again(
+    recorder_mock, hass: HomeAssistant, tmp_path: Path, now: FrozenDateTimeFactory
+) -> None:
+    up = await make(hass, tmp_path, [field("v2")])
+    # Last fetched 8 October: today 9 October is new, with 7 and 8 again.
+    await up._run(up.store.set_meta, "archive_daily_last", "2026-10-08")
+    calls = []
+
+    def fail(kind: str, day: Any) -> Exception | None:
+        calls.append(day)
+        if len(calls) == 3:
+            return PVOutputRateLimited("exceeded", time.time() + 600)
+        return None
+
+    up.client.fail = fail
+    await up.archive.async_cycle()
+    assert up.client.history_calls == ["20261007", "20261008"]
+
+    # After the pause only 9 October is left; 7 and 8 are not asked again.
+    now.tick(601)
+    await up.archive.async_cycle()
+    assert up.client.history_calls == ["20261007", "20261008", "20261009"]
+    await up.archive.async_cycle()
+    assert len(up.client.history_calls) == 3
+
+
+async def test_long_catch_up_in_batches(
+    recorder_mock, hass: HomeAssistant, tmp_path: Path, now: FrozenDateTimeFactory
+) -> None:
+    up = await make(hass, tmp_path, [field("v2")])
+    await up._run(up.store.set_meta, "archive_daily_last", "2026-09-20")
+    await up.archive.async_cycle()
+    await up.archive.async_cycle()
+    await up.archive.async_cycle()
+    # 21 September to 9 October, each once, ten per cycle.
+    assert len(up.client.history_calls) == 19
+    assert len(set(up.client.history_calls)) == 19
+
+
+def every_ten_minutes(skip: set[str] = frozenset()) -> list[HistoryStatus]:
+    """A day of statuses 00:10-23:50; energy goes up 10 Wh per status."""
+    statuses, energy = [], 0.0
+    for minute in range(10, 24 * 60, 10):
+        hhmm = f"{minute // 60:02d}:{minute % 60:02d}"
+        if hhmm[:2] in skip:
+            continue
+        energy += 10.0
+        statuses.append(HistoryStatus(hhmm, {"v1": energy, "v2": 100.0}))
+    return statuses
+
+
+@pytest.mark.parametrize(
+    ("day", "hours", "skip"),
+    [
+        # Sydney, clocks forward: 02:00-02:59 does not exist, the day has 23 hours.
+        (date(2026, 10, 4), 23, {"02"}),
+        # Sydney, clocks back: 02:00-02:59 happens twice, the day has 25 hours.
+        # PVOutput keys statuses by local time, so it holds one of each.
+        (date(2026, 4, 5), 25, set()),
+    ],
+)
+async def test_rollup_on_dst_days(
+    hass: HomeAssistant, day: date, hours: int, skip: set[str]
+) -> None:
+    await hass.config.async_set_time_zone("Australia/Sydney")
+    start, end = day_window(day)
+    assert end - start == hours * 3600
+    statuses = every_ten_minutes(skip)
+    rows = rollup(day, statuses, {"v1"})
+    energy = [(r[0], r[5]) for r in rows if r[1] == "v1"]
+    power = [r[0] for r in rows if r[1] == "v2"]
+    # Every hour lies within the day, none twice.
+    for hours_of in (energy, power):
+        stamps = [h[0] if isinstance(h, tuple) else h for h in hours_of]
+        assert all(start <= h < end for h in stamps)
+        assert len(stamps) == len(set(stamps))
+    # The energy adds up to PVOutput's total for the day.
+    assert sum(e for _, e in energy) == pytest.approx(statuses[-1].values["v1"])
+    # From 00:00 to the last status every hour has its energy (the missing
+    # or repeated hour shares the energy around it).
+    assert len(energy) == hours

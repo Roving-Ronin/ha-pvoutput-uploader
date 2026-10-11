@@ -2,9 +2,10 @@
 
 ## 0.1.8b2
 
-- **Late statuses reach the history:** each day the daily download also fetches the two days before yesterday again (three requests a day), so statuses that reached PVOutput late (another uploader catching up, a reupload) replace what was downloaded first.
+- **Late statuses reach the history:** each day the daily download also fetches the two days before yesterday again (three requests a day), so statuses that reached PVOutput late (another uploader catching up, a reupload) replace what was downloaded first. Each day fetched is checkpointed, so a pass stopped by the hourly limit does not ask for the same days again.
 - **Hours without statuses:** energy counted over hours PVOutput has no statuses for (a gap, or midnight to the first status) is shared evenly by those hours and the next hour with a status, instead of all landing in that next hour. The day's total stays exact; the README says which hours are estimates.
 - **Long history downloads rebuild the statistics every 30 days with detail and at the end**, not after every batch of ten days; a pending rebuild survives restarts.
+- Tests for daylight saving days (23 and 25 hour days, Sydney): every hour lies in its day, none twice, and energy adds up to PVOutput's day total.
 
 ## 0.1.8b1
 

@@ -77,7 +77,8 @@ IMPORT_EVERY_DAYS = 30
 META_BACKFILL = "archive_backfill"
 META_BACKFILL_RESULT = "archive_backfill_result"
 META_DAILY_LAST = "archive_daily_last"
-META_DAILY_REFRESHED = "archive_daily_refreshed"
+# The days fetched for the current "yesterday": {"for": day, "done": [days]}.
+META_DAILY_DONE = "archive_daily_done"
 # Changed archive hours not imported into statistics yet (earliest hour).
 META_IMPORT_FROM = "archive_import_from"
 
@@ -368,19 +369,28 @@ class Archive:
         else:
             first = max(last + timedelta(days=1), latest - timedelta(days=CATCH_UP_DAYS - 1))
             days = {first + timedelta(days=n) for n in range((latest - first).days + 1)}
-            if await self.up._run(store.get_meta, META_DAILY_REFRESHED) != latest.isoformat():
+            if last < latest:
+                # A new day: the days before it once more.
                 days |= {latest - timedelta(days=n) for n in range(1, REFRESH_DAYS + 1)}
-        if not days:
-            return
+        # Each day fetched for this "yesterday" is checkpointed, so a pass
+        # stopped by the hourly limit only fetches what it has not yet.
+        raw = await self.up._run(store.get_meta, META_DAILY_DONE)
+        state = json.loads(raw) if raw else {}
+        done = set(state.get("done", [])) if state.get("for") == latest.isoformat() else set()
         fetched = 0
-        for day in sorted(days):
+        for day in sorted(d for d in days if d.isoformat() not in done):
             if fetched == MAX_REQUESTS_PER_CYCLE or await self._fetch_day(day) is None:
                 return
             fetched += 1
+            done.add(day.isoformat())
+            await self.up._run(
+                store.set_meta,
+                META_DAILY_DONE,
+                json.dumps({"for": latest.isoformat(), "done": sorted(done)}),
+            )
             if last is None or day > last:
                 last = day
                 await self.up._run(store.set_meta, META_DAILY_LAST, day.isoformat())
-        await self.up._run(store.set_meta, META_DAILY_REFRESHED, latest.isoformat())
 
     # Statistics
 
