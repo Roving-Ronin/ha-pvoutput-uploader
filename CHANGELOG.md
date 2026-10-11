@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.1.7
+
+Stable release of the 0.1.7 betas (b1-b4): fields can be read from PVOutput as well as sent.
+
+- **Field modes: Send, Record only or Download**, per field, from a select on the device page or all at once under Configure → Fields. A field keeps its sensor or fixed value and settings in every mode, so switching back restores them; a downloading field's sensor keeps being recorded (never sent), so switching back leaves no gap.
+- **Download**: the latest status is read from PVOutput (getstatus.jsp; v7-v12 for donors) once per upload interval, also while Uploading is off, into *<field> <label> from PVOutput* sensors plus Normalised output. Values PVOutput does not have are unknown; after three intervals without a successful read the sensors turn unavailable; only "No status found" clears the reading, other rejections show in Last error. Battery fields cannot be downloaded.
+- **Add field → From PVOutput** for download-only fields; setting one to Send or Record only asks for a sensor or fixed value.
+- **Mode changes are checked when saved**, against the field and account as they are then.
+- **Last upload** is kept across restarts and reloads and shown only while a field can be uploaded; **Last download** while a field downloads.
+- README: a **Field modes** section explaining sources, modes, the selects and switching direction.
+
+**Upgrading from 0.1.6:** the per-field *Send <field>* switches are replaced by the field selects and removed on update; automations that switched them need `select.select_option` with `send` or `record_only`. Configure → Active fields is now Configure → Fields. Field settings are kept as they were.
+
+Details per beta below.
+
 ## 0.1.7b4
 
 - **Last upload no longer resets to Unknown** after a restart or reload (e.g. changing a field's select): it is kept in the log database.

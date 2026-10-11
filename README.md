@@ -13,9 +13,11 @@ Fields can also be read back from PVOutput into sensors (download), per field.
 2. **Settings → Devices & services → Add integration → PVOutput Uploader**, enter the API
    key and system ID from pvoutput.org (*Settings → API Settings*). The status interval
    and donor status are read from your account. Use **Add PV Site** to add another system.
-3. Open **Configure → Add field** and add the sensors or fixed values to send.
-   Available fields depend on donor status; see **How it works → Donor features** for details.
-   For sensors without a unit, enter **Source / custom unit** when prompted.
+3. Open **Configure → Add field** and add the sensors or fixed values to send, or
+   fields to read back **From PVOutput**. Available fields depend on donor status; see
+   **How it works → Donor features** for details. For sensors without a unit, enter
+   **Source / custom unit** when prompted. Each field is then set to Send, Record only
+   or Download (see **Field modes**).
 4. Optional: **Configure → Import history from Home Assistant** to fill the log for the
    days before installing, and send them. Statuses go up to 100 per request (donor),
    battery fields included, so weeks of history take minutes.
@@ -49,7 +51,7 @@ service of the IoTaWatt firmware, any period in the log can also be sent again.
 
 | | What it holds | How long | Used for |
 |---|---|---|---|
-| **History log** (`pvoutput_uploader_<system id>.db` in the configuration folder) | 5 minute values of every configured sensor, active and passive, temperatures included | **91 days** by default (*Settings → Keep history for*): the 90 days donors can send statuses for, plus today | Everything that is sent and reuploaded |
+| **History log** (`pvoutput_uploader_<system id>.db` in the configuration folder) | 5 minute values of every configured sensor (Send and Record only fields, and the kept sensor of Download fields), temperatures included | **91 days** by default (*Settings → Keep history for*): the 90 days donors can send statuses for, plus today | Everything that is sent and reuploaded |
 | Home Assistant **recorder** states | Every state change of the sensors | `purge_keep_days` of the recorder (10 days by default) | Feeding the log every minute, and catching up after the integration was not running |
 | Home Assistant **long term statistics** | Hourly mean/min/max, or energy change, of sensors that have a `state_class` | Forever | Only **Import history**, for periods the log never recorded |
 
@@ -120,7 +122,7 @@ automatically.
 |---|---|
 | PVOutput rejected a status, or part of it (shown in **Rejected samples** and **Partly sent samples**) | Fix the cause (e.g. the sensor), then **Reupload history → since the first unsent status** |
 | PVOutput rejected a daily total (shown in **Rejected daily outputs**) | **Reupload history** for that day, sent as daily totals |
-| You want a period sent again (e.g. a field was made active, or PVOutput data was edited) | **Reupload history → from a date and time** |
+| You want a period sent again (e.g. a field was set to Send, or PVOutput data was edited) | **Reupload history → from a date and time** |
 | The integration was not running for longer than the recorder keeps states | **Import history from Home Assistant** fills the rest from hourly statistics (sensors without a `state_class` have none) |
 | You want PVOutput filled for the time before installing | **Import history from Home Assistant** with *Send to PVOutput* on |
 
@@ -135,8 +137,9 @@ Each action saves as soon as it is submitted.
 - **Add field**: first choose where the value comes from:
   - **A sensor**: pick the sensor and the PVOutput field it fills (only fields not used
     yet, and donor fields only for donor accounts). Then name it as in PVOutput, choose
-    whether it is **active**, and, where a field allows it, how the 5 minute values of an
-    interval are combined: average, last value, or energy since midnight.
+    whether it is **Active** (on: Send, off: Record only), and, where a field allows it,
+    how the 5 minute values of an interval are combined: average, last value, or energy
+    since midnight.
   - **A fixed value**: the same number in every status, e.g. the battery size for `b3`
     (for `b6`, the battery state, you pick the state from a list). It is not logged and
     never sends a status on its own.
@@ -178,7 +181,7 @@ Each action saves as soon as it is submitted.
 
 **b1 is mandatory for battery data.** PVOutput ignores b2-b6 in a status without b1, so
 **Add field** offers b2-b6 only once b1 is configured, b1 cannot be removed while other
-battery fields remain, and without an active b1 the other battery fields are not sent
+battery fields remain, and without b1 set to Send the other battery fields are not sent
 (their field sensors say why).
 
 **A b6 state when the battery does not report one.** Battery monitors such as a Victron
@@ -339,7 +342,7 @@ own choice for its own period, also while an earlier one is still sending; where
 overlap, the newest choice wins. A status longer than 5 minutes that holds rows of two
 choices sends the passive fields of both. A site whose fields are all passive still
 sends what a reupload or import chose. Donor-only fields still need a donor account,
-and battery fields need b1 (active or ticked too). In the action: `passive_fields: [v7, b2]`.
+and battery fields need b1 (set to Send, or ticked too). In the action: `passive_fields: [v7, b2]`.
 
 Battery fields (`b1`–`b6`) go in the same batches as the other fields, up to 100
 statuses per request for donors, so three weeks of 5 minute statuses (6,048) take about
@@ -414,38 +417,50 @@ with 4,657 still waiting to upload. The diagnostics show progress as the backlog
 - **Battery fields** go in the same batches as the other fields, as six columns after
   `v12` (b1-b6). PVOutput documents them only for single statuses; its batch service
   takes and stores them all the same (tested).
+- **Download.** Fields in Download mode are read with `getstatus.jsp` (with `ext=1` for
+  v7-v12 on donor accounts) once per upload interval, independently of uploading, and
+  paced and rate limited like uploads. Readings are kept in memory only; see
+  **Download** above for freshness and errors.
 
 ## Entities
 
 The PVOutput system's device page shows what is uploaded and as what:
 
-- **One sensor per configured field**, named after the PVOutput field and your label (e.g.
-  *v5 Ambient*). Its state is the source sensor's friendly name or fixed
-  value, followed by the upload unit (e.g. *Outside °C* or *5544 Wh*). The source entity ID is available in the `source_entity` attribute;
-  `source_unit` and `pvoutput_unit` show the source and upload units. Attributes: the PVOutput field and its standard name, active or passive,
-  `configured_to_send` (active and allowed by the account type; donor-only fields on a
-  standard account are not), how the 5 minute values are combined, and the last recorded
-  value with its time. The icon follows `configured_to_send`. It does not show whether
-  uploading is switched on or what PVOutput accepted: see the **Uploading** switch and the
-  diagnostic sensors for that.
-- **Uploading** switch: stops sending while recording carries on.
+- **One sensor per configured field**, named after the PVOutput field and your label
+  (e.g. *v5 Ambient*). Its state is the source sensor's friendly name or fixed value,
+  followed by the upload unit (e.g. *Outside °C* or *5544 Wh*), or *PVOutput* for a
+  field added from PVOutput. Attributes:
+  - `pvoutput_field`, `pvoutput_field_name`: the field and its standard name.
+  - `mode` (`send`, `record_only` or `download`), with `direction` and `active` behind it.
+  - `source` (`sensor`, `fixed value` or `none`), `source_entity`, `source_name`,
+    `source_unit`, and `pvoutput_unit`, the unit sent.
+  - `configured_to_send`: set to Send and allowed by the account type (donor-only
+    fields on a standard account are not, and `not_configured_to_send_because` says
+    why). The icon follows it, or shows a download arrow in Download mode.
+  - `value_per_interval` and the last recorded value with its time.
+
+  It does not show whether uploading is switched on or what PVOutput accepted: see the
+  **Uploading** switch and the diagnostic sensors for that.
 - **One select per field** (e.g. *v5 Ambient*), under Configuration: **Send**,
   **Record only** or **Download**, offering only what the field can do (see **Field
   modes** for which options appear and why). Changing it saves the configuration and
-  the site reloads to apply it, which takes a few seconds. (Before 0.1.7 these were
-  *Send <field>* switches; they are removed on update, so automations using them need
-  `select.select_option` instead.)
-- **Download sensors**, one per downloaded field (*v2 Power from PVOutput*), plus
-  **Normalised output from PVOutput**.
+  the site reloads to apply it, which takes a few seconds. Automations use
+  `select.select_option`.
+- **Uploading** switch: stops sending while recording carries on. Downloads continue.
+- **Download sensors**, one per field in Download mode (*v2 Power from PVOutput*), plus
+  **Normalised output from PVOutput** (unknown while PVOutput has none, e.g. at night
+  when nothing is generated). Attributes: `pvoutput_status`, `downloaded_at`, and
+  `not_downloaded_because` where it applies.
 - **Clear queued history** button (under Controls, next to Uploading): takes the waiting history off the queue (statuses
   older than the last two upload intervals, and queued daily totals) and ends a "leave
   out battery fields" run. Current statuses keep going. Nothing is deleted: cleared
   statuses stay in the log as unsent (**Cleared samples**), and **Reupload history**,
   also *since the first unsent status*, sends them again.
-- Diagnostic sensors: last upload (while any field can be uploaded) and last download (while any field downloads), both kept across restarts and reloads; samples waiting, daily outputs waiting, rejected
-  samples, partly sent samples, cleared samples, sent without battery, rejected daily
-  outputs, history size and start, requests left this hour, rate limit pause, account
-  type, last error.
+- Diagnostic sensors: last upload (while any field can be uploaded) and last download
+  (while any field downloads), both kept across restarts and reloads; samples waiting,
+  daily outputs waiting, rejected samples, partly sent samples, cleared samples, sent
+  without battery, rejected daily outputs, history size and start, requests left this
+  hour, rate limit pause, account type, last error.
 
 ## Settings
 
