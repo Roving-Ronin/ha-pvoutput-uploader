@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.1.7b1
+
+First stage of download: fields can be read from PVOutput as well as sent.
+
+- **Per-field select: Send, Record only or Download** (Configuration on the device page), replacing the *Send <field>* switches, which are removed on update. Configure → Active fields becomes **Fields**, with the same three choices per field on one page.
+- **Download** reads the latest status from PVOutput (getstatus.jsp, v7-v12 for donors) once per upload interval, also while Uploading is off, into a sensor per field, *<field> <label> from PVOutput*, plus **Normalised output from PVOutput**. Unknown when PVOutput has no value. Battery fields cannot be downloaded (PVOutput does not return them).
+- **Both directions kept per field:** switching to Download keeps the sensor or fixed value and settings (and keeps recording the sensor), so switching back restores them with no gap.
+- **Add field → From PVOutput** adds a download-only field without a Home Assistant source. Setting it to Send or Record only under Fields asks for a sensor or fixed value next; Edit field can set one too.
+
 ## 0.1.6
 
 Stable release of the 0.1.6 betas (b1-b12). Highlights since 0.1.5:

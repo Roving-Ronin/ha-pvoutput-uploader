@@ -144,23 +144,31 @@ async def async_setup_entry(
 ) -> None:
     """Set up the field and status sensors."""
     coordinator = entry.runtime_data
-    fields = [
-        FieldSensor(coordinator, mapping) for mapping in coordinator.uploader.mappings
+    uploader = coordinator.uploader
+    fields: list[SensorEntity] = [
+        FieldSensor(coordinator, mapping) for mapping in uploader.mappings
     ]
-    # Drop the sensors of fields that were removed.
-    wanted = {sensor.unique_id for sensor in fields}
-    prefix = f"{entry.data[CONF_SYSTEM_ID]}_field_"
+    downloads: list[SensorEntity] = [
+        DownloadSensor(coordinator, mapping) for mapping in uploader.download_mappings
+    ]
+    if downloads:
+        downloads.append(PVOutputSensor(coordinator, EFFICIENCY))
+    # Drop the sensors of removed fields, and download sensors no longer needed.
+    wanted = {sensor.unique_id for sensor in (*fields, *downloads)}
+    sid = entry.data[CONF_SYSTEM_ID]
+    managed = (f"{sid}_field_", f"{sid}_download_", f"{sid}_normalised_output")
     registry = er.async_get(hass)
     for reg_entry in er.async_entries_for_config_entry(registry, entry.entry_id):
         if (
             reg_entry.domain == "sensor"
-            and reg_entry.unique_id.startswith(prefix)
+            and reg_entry.unique_id.startswith(managed)
             and reg_entry.unique_id not in wanted
         ):
             registry.async_remove(reg_entry.entity_id)
     async_add_entities(
         [
             *fields,
+            *downloads,
             *(PVOutputSensor(coordinator, description) for description in SENSORS),
         ]
     )
@@ -228,7 +236,9 @@ class FieldSensor(PVOutputEntity, SensorEntity):
 
     @property
     def icon(self) -> str:
-        """Show whether the field is configured to be sent."""
+        """Show download, or whether the field is configured to be sent."""
+        if self.mapping.download:
+            return "mdi:download"
         return "mdi:upload" if self._configured_to_send else "mdi:upload-off"
 
     @property
@@ -240,7 +250,12 @@ class FieldSensor(PVOutputEntity, SensorEntity):
 
     @property
     def native_value(self) -> str:
-        """Return a readable source name or fixed value, with the upload unit."""
+        """Return a readable source name or fixed value, with the upload unit.
+
+        Download fields show PVOutput: that is where their value comes from.
+        """
+        if self.mapping.download:
+            return "PVOutput"
         value = self._source_label
         unit = self._upload_unit
         return f"{value[:255 - len(unit) - 1]} {unit}" if unit else value[:255]
@@ -271,12 +286,14 @@ class FieldSensor(PVOutputEntity, SensorEntity):
         attrs: dict[str, Any] = {
             "pvoutput_field": m.field,
             "pvoutput_field_name": field.name,
-            "source": "sensor" if m.entity_id else "fixed value",
+            "source": "sensor" if m.entity_id else "fixed value" if m.has_source else "none",
+            "direction": m.direction,
+            "mode": m.mode,
             "active": m.active,
             "configured_to_send": self._configured_to_send,
             "pvoutput_unit": self._upload_unit,
         }
-        if m.active and not self._configured_to_send:
+        if m.active and not m.download and not self._configured_to_send:
             if field.donor and not uploader.donor:
                 reason = "needs a PVOutput donor account"
             else:
@@ -299,3 +316,67 @@ class FieldSensor(PVOutputEntity, SensorEntity):
                 if (unit := RECORDED_UNITS.get(kind)) is not None:
                     attrs["last_recorded_unit"] = unit
         return attrs
+
+
+DEVICE_CLASSES = {
+    KIND_ENERGY: SensorDeviceClass.ENERGY,
+    KIND_POWER: SensorDeviceClass.POWER,
+    KIND_TEMPERATURE: SensorDeviceClass.TEMPERATURE,
+    KIND_VOLTAGE: SensorDeviceClass.VOLTAGE,
+}
+
+
+class DownloadSensor(PVOutputEntity, SensorEntity):
+    """A field's value as PVOutput holds it now (download direction).
+
+    Read once per status interval with getstatus.jsp. PVOutput's "NaN" (no
+    value) shows as unknown, not 0. Energy fields count since local midnight,
+    so they are total_increasing and work in the Energy dashboard.
+    """
+
+    _attr_icon = "mdi:download"
+
+    def __init__(self, coordinator: PVOutputCoordinator, mapping: FieldMapping) -> None:
+        """Initialize the sensor."""
+        super().__init__(coordinator, f"download_{mapping.field}")
+        self._attr_translation_key = None
+        self._attr_name = f"{mapping.field} {mapping.name} from PVOutput"
+        self.mapping = mapping
+        field = FIELDS_BY_KEY[mapping.field]
+        kind = KIND_ENERGY if mapping.aggregate == AGG_ENERGY_TODAY else field.kind
+        self._attr_native_unit_of_measurement = upload_unit(
+            mapping.field, mapping.aggregate, mapping.unit
+        )
+        self._attr_device_class = DEVICE_CLASSES.get(kind)
+        self._attr_state_class = (
+            SensorStateClass.TOTAL_INCREASING
+            if kind == KIND_ENERGY
+            else SensorStateClass.MEASUREMENT
+        )
+
+    @property
+    def available(self) -> bool:
+        """Unknown rather than unavailable while PVOutput has no value."""
+        return True
+
+    @property
+    def native_value(self) -> float | None:
+        """Return the value PVOutput holds."""
+        reading = self.coordinator.uploader.reading
+        return reading.values.get(self.mapping.field) if reading else None
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        """Tell which PVOutput field and status the value comes from."""
+        attrs: dict[str, Any] = {"pvoutput_field": self.mapping.field}
+        if (reading := self.coordinator.uploader.reading) is not None:
+            attrs["pvoutput_status"] = f"{reading.date} {reading.time}"
+        return attrs
+
+
+EFFICIENCY = PVOutputSensorDescription(
+    key="normalised_output",
+    native_unit_of_measurement="kWh/kW",
+    state_class=SensorStateClass.MEASUREMENT,
+    value_fn=lambda u: u.reading.efficiency if u.reading else None,
+)

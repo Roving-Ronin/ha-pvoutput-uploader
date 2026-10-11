@@ -23,6 +23,7 @@ from .api import (
     PVOutputClient,
     PVOutputError,
     PVOutputRateLimited,
+    StatusReading,
 )
 from .builder import (
     Source,
@@ -30,6 +31,11 @@ from .builder import (
     async_build_from_statistics,
 )
 from .const import (
+    DIRECTION_UPLOAD,
+    MAP_DIRECTION,
+    MODE_DOWNLOAD,
+    MODE_RECORD,
+    MODE_SEND,
     AGG_ENERGY_TODAY,
     AGG_LAST,
     BATTERY_POWER,
@@ -114,6 +120,7 @@ class FieldMapping:
     active: bool
     aggregate: str
     unit: str | None = None
+    direction: str = DIRECTION_UPLOAD
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> FieldMapping:
@@ -127,7 +134,25 @@ class FieldMapping:
             active=data.get(MAP_ACTIVE, True),
             aggregate=data.get(MAP_AGGREGATE) or field.default_aggregate,
             unit=data.get(MAP_UNIT) or None,
+            direction=data.get(MAP_DIRECTION) or DIRECTION_UPLOAD,
         )
+
+    @property
+    def has_source(self) -> bool:
+        """Return whether the field has an HA sensor or a fixed value to upload."""
+        return self.entity_id is not None or self.constant is not None
+
+    @property
+    def download(self) -> bool:
+        """Return whether the field is read from PVOutput instead of sent."""
+        return self.direction == DIRECTION_DOWNLOAD
+
+    @property
+    def mode(self) -> str:
+        """Return send, record_only or download."""
+        if self.download:
+            return MODE_DOWNLOAD
+        return MODE_SEND if self.active else MODE_RECORD
 
     @property
     def decimals(self) -> int:
@@ -196,6 +221,9 @@ class Uploader:
         self.last_error: str | None = None
         # Kept apart from upload errors: a working upload must not hide it.
         self.record_error: str | None = None
+        # The latest status read from PVOutput for download fields, and when.
+        self.reading: StatusReading | None = None
+        self._downloaded_at: float | None = None
         self.summary: dict[str, Any] = {}
         # Field key -> (timestamp, value) of its latest recorded value.
         self.latest: dict[str, tuple[int, float]] = {}
@@ -238,8 +266,15 @@ class Uploader:
 
     @property
     def passive_mappings(self) -> list[FieldMapping]:
-        """Return configured fields that are recorded but not sent (passive)."""
-        return [m for m in self.mappings if not m.active]
+        """Return upload fields that are recorded but not sent (passive)."""
+        return [
+            m for m in self.mappings if not m.active and not m.download and m.has_source
+        ]
+
+    @property
+    def download_mappings(self) -> list[FieldMapping]:
+        """Return the fields read from PVOutput."""
+        return [m for m in self.mappings if m.download]
 
     def _sendable(self, extra: Iterable[str]) -> list[FieldMapping]:
         """Return the active mappings plus the passive fields in ``extra``.
@@ -251,9 +286,10 @@ class Uploader:
         sent = [
             m
             for m in self.mappings
-            if (m.active or m.field in extra)
+            if not m.download
+            and (m.active or m.field in extra)
             and (self.donor or not FIELDS_BY_KEY[m.field].donor)
-            and (m.entity_id or m.constant is not None)
+            and m.has_source
         ]
         if not any(m.field == BATTERY_POWER for m in sent):
             # PVOutput ignores the other battery values without b1.
@@ -309,6 +345,12 @@ class Uploader:
                 except PVOutputError as err:
                     self.last_error = str(err)
                     _LOGGER.warning("PVOutput upload stopped: %s", err)
+            # Downloading does not depend on the Uploading switch.
+            try:
+                await self._async_download()
+            except PVOutputError as err:
+                self.last_error = f"Download: {err}"
+                _LOGGER.warning("PVOutput download failed: %s", err)
             await self._async_housekeeping()
             await self._refresh_summary()
 
@@ -329,6 +371,32 @@ class Uploader:
             await self._run(self.store.add_samples, samples)
             last = end
             await self._run(self.store.set_meta, META_LAST_BUILT, str(last))
+
+    # Download
+
+    async def _async_download(self) -> None:
+        """Read the latest status for download fields, once per status interval."""
+        if not self.download_mappings:
+            self.reading = None
+            return
+        now = time.time()
+        if self._downloaded_at is not None and now - self._downloaded_at < self.upload_interval:
+            return
+        if not self._rate_ok(RATE_RESERVE):
+            return
+        await self._pace()
+        try:
+            reading = await self.client.get_status(extended=self.donor)
+        except PVOutputRateLimited as err:
+            await self._pause(err.reset, str(err))
+            return
+        except PVOutputBadRequest as err:
+            # E.g. "No status found": nothing recorded at PVOutput yet today.
+            _LOGGER.debug("PVOutput has no status to download: %s", err)
+            self._downloaded_at = now
+            return
+        self.reading = reading
+        self._downloaded_at = now
 
     # Rate limit
 

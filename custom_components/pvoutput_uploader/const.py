@@ -28,6 +28,16 @@ MAP_ACTIVE: Final = "active"
 MAP_AGGREGATE: Final = "aggregate"
 # Fallback when a sensor does not report a unit; display unit for raw constants.
 MAP_UNIT: Final = "source_unit"
+# upload (recorded; sent when active) or download (read from PVOutput). Both sides'
+# settings stay on the field, so flipping back restores them.
+MAP_DIRECTION: Final = "direction"
+DIRECTION_UPLOAD: Final = "upload"
+DIRECTION_DOWNLOAD: Final = "download"
+
+# What a field does, as one choice (the per-field select and the Fields page).
+MODE_SEND: Final = "send"
+MODE_RECORD: Final = "record_only"
+MODE_DOWNLOAD: Final = "download"
 
 DONOR_AUTO: Final = "auto"
 DONOR_YES: Final = "donor"
@@ -167,3 +177,17 @@ def upload_unit(field: str, aggregate: str | None = None, source_unit: str | Non
     if field == "b6":
         return None
     return PVOUTPUT_UNITS.get(FIELDS_BY_KEY[field].kind, source_unit)
+
+
+def downloadable(field: str) -> bool:
+    """Return whether getstatus.jsp returns the field (not the battery fields)."""
+    return not FIELDS_BY_KEY[field].battery
+
+
+def apply_mode(field: dict, mode: str) -> None:
+    """Set a field's options for a mode; the other side's settings stay."""
+    if mode == MODE_DOWNLOAD:
+        field[MAP_DIRECTION] = DIRECTION_DOWNLOAD
+    else:
+        field[MAP_DIRECTION] = DIRECTION_UPLOAD
+        field[MAP_ACTIVE] = mode == MODE_SEND

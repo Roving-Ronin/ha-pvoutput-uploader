@@ -49,6 +49,44 @@ class SystemInfo:
     donor: bool
 
 
+@dataclass(frozen=True, slots=True)
+class StatusReading:
+    """The latest status PVOutput holds for the system (getstatus.jsp)."""
+
+    date: str  # yyyymmdd
+    time: str  # hh:mm
+    values: dict[str, float | None]  # v1..v12; None where PVOutput has none
+    efficiency: float | None  # normalised output, kWh/kW
+
+
+# getstatus.jsp columns after date and time; v7-v12 only with ext=1 (donors).
+STATUS_COLUMNS = ("v1", "v2", "v3", "v4", "efficiency", "v5", "v6") + tuple(
+    f"v{n}" for n in range(7, 13)
+)
+
+
+def _number(text: str) -> float | None:
+    """Return a status value; PVOutput sends NaN for none."""
+    try:
+        value = float(text)
+    except ValueError:
+        return None
+    return None if value != value else value  # NaN
+
+
+def parse_status(text: str) -> StatusReading:
+    """Parse a getstatus.jsp answer (no history)."""
+    cols = text.strip().split(",")
+    if len(cols) < 3:
+        raise PVOutputError(f"getstatus.jsp: unexpected answer {text[:80]!r}")
+    found = dict(zip(STATUS_COLUMNS, cols[2:], strict=False))
+    values = {
+        key: _number(found[key]) for key in STATUS_COLUMNS if key != "efficiency" and key in found
+    }
+    efficiency = _number(found["efficiency"]) if "efficiency" in found else None
+    return StatusReading(cols[0], cols[1], values, efficiency)
+
+
 class PVOutputClient:
     """Talks to PVOutput and tracks the hourly rate limit."""
 
@@ -125,6 +163,14 @@ class PVOutputClient:
             except ValueError:
                 donor = False
         return SystemInfo(fields[0], interval, donor)
+
+    async def get_status(self, extended: bool) -> StatusReading:
+        """Return the latest status; ``extended`` adds v7-v12 (donors only).
+
+        Battery fields are not returned by getstatus.jsp.
+        """
+        params = {"ext": "1"} if extended else {}
+        return parse_status(await self._request("GET", "getstatus.jsp", params))
 
     async def add_status(self, params: dict[str, str]) -> str:
         """Send one status, including battery values."""

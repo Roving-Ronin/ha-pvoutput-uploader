@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from datetime import date
 from functools import partial
+import time
 from pathlib import Path
 from typing import Any
 from unittest.mock import patch
@@ -19,6 +20,7 @@ from custom_components.pvoutput_uploader import uploader as uploader_module
 from custom_components.pvoutput_uploader.api import (
     PVOutputBadRequest,
     PVOutputRateLimited,
+    StatusReading,
 )
 from custom_components.pvoutput_uploader.const import (
     AGG_AVERAGE,
@@ -64,6 +66,8 @@ class FakeClient:
         self.rate_reset: float | None = None
         # Times (hh:mm) addbatchstatus.jsp answers with status 0 for.
         self.not_added: set[str] = set()
+        self.statuses: list[bool] = []
+        self.reading: StatusReading | None = None
 
     def _check(self, kind: str, payload: Any) -> None:
         if self.fail and (err := self.fail(kind, payload)):
@@ -92,6 +96,12 @@ class FakeClient:
         self._check("batch_output", lines)
         self.batch_outputs.append(lines)
         return ""
+
+    async def get_status(self, extended: bool) -> StatusReading:
+        self._check("get_status", extended)
+        self.statuses.append(extended)
+        assert self.reading is not None
+        return self.reading
 
 
 def line(time: str, day: str = "20261010", **values: str) -> str:
@@ -1360,3 +1370,71 @@ async def test_long_status_sends_passive_fields_of_all_its_windows(
     # A 5 minute status holds one row: one window.
     assert up._passive_for([a, b], end, 300) == ["v6"]
     assert up._passive_for([a, b], local_ts(10, 9, 10, 10), 300) == ["v5"]
+
+
+async def test_download_fields_are_not_sent(
+    hass: HomeAssistant, tmp_path: Path, now: FrozenDateTimeFactory
+) -> None:
+    up = await make(
+        hass,
+        tmp_path,
+        [
+            field("v2"),
+            # Downloading: its sensor is kept (and recorded) for switching back.
+            field("v5", direction="download"),
+            # Added from PVOutput: no source at all.
+            field("v6", entity=None, direction="download"),
+        ],
+    )
+    assert [m.mode for m in up.mappings] == ["send", "download", "download"]
+    assert [m.field for m in up.download_mappings] == ["v5", "v6"]
+    assert up.passive_mappings == []
+    await add(
+        up,
+        Sample(local_ts(10, 10, 10, 5), {"v2": 100.0, "v5": 20.0}),
+        Sample(local_ts(10, 10, 10, 10), {"v2": 200.0, "v5": 21.0}),
+        last_built=local_ts(10, 10, 10, 10),
+    )
+    await up._async_upload_statuses()
+    assert up.client.batches == [["20261010,10:05,,100", "20261010,10:10,,200"]]
+
+
+async def test_download_once_per_interval(
+    hass: HomeAssistant, tmp_path: Path, now: FrozenDateTimeFactory
+) -> None:
+    up = await make(hass, tmp_path, [field("v2", entity=None, direction="download")])
+    up.client.reading = StatusReading("20261010", "10:15", {"v2": 450.0}, 0.1)
+    await up._async_download()
+    assert up.reading == up.client.reading
+    assert up.client.statuses == [False]
+
+    # Not again within the upload interval.
+    now.tick(120)
+    await up._async_download()
+    assert up.client.statuses == [False]
+    now.tick(200)
+    await up._async_download()
+    assert up.client.statuses == [False, False]
+
+
+async def test_download_extended_for_donors_and_errors(
+    hass: HomeAssistant, tmp_path: Path, now: FrozenDateTimeFactory
+) -> None:
+    up = await make(
+        hass, tmp_path, [field("v7", entity=None, direction="download")], donor=True
+    )
+    up.client.fail = lambda kind, _: PVOutputBadRequest("No status found")
+    await up._async_download()
+    assert up.reading is None
+    assert up.paused_until is None
+
+    now.tick(600)
+    up.client.fail = lambda kind, _: PVOutputRateLimited("exceeded", time.time() + 900)
+    await up._async_download()
+    assert up.paused_until is not None
+
+    # No download fields: nothing is requested, and no stale reading stays.
+    up.reading = StatusReading("20261010", "10:00", {}, None)
+    up.mappings = []
+    await up._async_download()
+    assert up.reading is None

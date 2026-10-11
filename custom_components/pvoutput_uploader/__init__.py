@@ -26,7 +26,7 @@ from .uploader import Uploader
 
 _LOGGER = logging.getLogger(__name__)
 
-PLATFORMS = [Platform.BUTTON, Platform.SENSOR, Platform.SWITCH]
+PLATFORMS = [Platform.BUTTON, Platform.SELECT, Platform.SENSOR, Platform.SWITCH]
 CONFIG_SCHEMA = cv.config_entry_only_config_schema(DOMAIN)
 
 

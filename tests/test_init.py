@@ -18,6 +18,7 @@ from pytest_homeassistant_custom_component.common import MockConfigEntry
 from custom_components.pvoutput_uploader.api import (
     PVOutputAuthError,
     PVOutputConnectionError,
+    StatusReading,
     SystemInfo,
 )
 from custom_components.pvoutput_uploader.config_flow import DEFAULT_OPTIONS
@@ -379,7 +380,18 @@ async def test_clear_queue_button(
     assert await hass.config_entries.async_unload(entry.entry_id)
 
 
-async def test_field_active_switches(
+GET_STATUS = "custom_components.pvoutput_uploader.api.PVOutputClient.get_status"
+
+
+def _modes(entry: MockConfigEntry) -> dict[str, str]:
+    return {
+        m["field"]: "download" if m.get("direction") == "download"
+        else "send" if m["active"] else "record_only"
+        for m in entry.options["fields"]
+    }
+
+
+async def test_field_mode_selects(
     recorder_mock, hass: HomeAssistant, entry: MockConfigEntry
 ) -> None:
     fields = [
@@ -391,33 +403,59 @@ async def test_field_active_switches(
             "field": "v6", "entity_id": "sensor.voltage", "constant": None,
             "name": "Grid", "active": False, "aggregate": "average",
         },
+        {
+            "field": "v2", "entity_id": None, "constant": None, "name": "Power",
+            "active": True, "aggregate": "average", "direction": "download",
+        },
     ]
     hass.config_entries.async_update_entry(
         entry, options=dict(entry.options) | {"fields": fields}
     )
-    with patch(GET_SYSTEM, AsyncMock(return_value=SystemInfo("My System", 5, False))):
+    reading = StatusReading("20261011", "12:00", {"v2": 1500.0, "v5": None}, 0.25)
+    with (
+        patch(GET_SYSTEM, AsyncMock(return_value=SystemInfo("My System", 5, False))),
+        patch(GET_STATUS, AsyncMock(return_value=reading)) as get_status,
+    ):
         await _setup(hass, entry)
-        assert hass.states.get("switch.my_system_send_v5_ambient").state == "on"
-        assert hass.states.get("switch.my_system_send_v6_grid").state == "off"
-        # The field sensors are not taken for removed fields' switches, or the reverse.
+        v5 = hass.states.get("select.my_system_v5_ambient")
+        assert v5.state == "send"
+        assert v5.attributes["options"] == ["send", "record_only", "download"]
+        assert hass.states.get("select.my_system_v6_grid").state == "record_only"
+        # A field with no source in Home Assistant can only download.
+        v2 = hass.states.get("select.my_system_v2_power")
+        assert v2.state == "download"
+        assert v2.attributes["options"] == ["download"]
+        # The field sensors are not taken for the selects, or the reverse.
         assert hass.states.get("sensor.my_system_v5_ambient") is not None
 
-        await hass.services.async_call(
-            "switch", "turn_off", {"entity_id": "switch.my_system_send_v5_ambient"},
-            blocking=True,
-        )
-        await hass.async_block_till_done(wait_background_tasks=True)
-        assert {m["field"]: m["active"] for m in entry.options["fields"]} == {
-            "v5": False, "v6": False,
-        }
-        # After the reload the switch shows the new state.
-        assert hass.states.get("switch.my_system_send_v5_ambient").state == "off"
+        # Download sensors, read from PVOutput (v7-v12 only for donors).
+        get_status.assert_called_with(extended=False)
+        power = hass.states.get("sensor.my_system_v2_power_from_pvoutput")
+        assert float(power.state) == 1500.0
+        assert power.attributes["unit_of_measurement"] == "W"
+        assert power.attributes["pvoutput_status"] == "20261011 12:00"
+        assert float(hass.states.get("sensor.my_system_normalised_output_from_pvoutput").state) == 0.25
 
         await hass.services.async_call(
-            "switch", "turn_on", {"entity_id": "switch.my_system_send_v6_grid"},
+            "select", "select_option",
+            {"entity_id": "select.my_system_v5_ambient", "option": "download"},
             blocking=True,
         )
         await hass.async_block_till_done(wait_background_tasks=True)
-        assert entry.options["fields"][1]["active"] is True
+        assert _modes(entry) == {"v5": "download", "v6": "record_only", "v2": "download"}
+        # The upload source stays, for switching back.
+        assert entry.options["fields"][0]["entity_id"] == "sensor.outside"
+        assert hass.states.get("select.my_system_v5_ambient").state == "download"
+        # PVOutput had no temperature: unknown, not 0.
+        assert hass.states.get("sensor.my_system_v5_ambient_from_pvoutput").state == "unknown"
+
+        await hass.services.async_call(
+            "select", "select_option",
+            {"entity_id": "select.my_system_v5_ambient", "option": "send"},
+            blocking=True,
+        )
+        await hass.async_block_till_done(wait_background_tasks=True)
+        assert _modes(entry)["v5"] == "send"
+        assert hass.states.get("sensor.my_system_v5_ambient_from_pvoutput") is None
 
     assert await hass.config_entries.async_unload(entry.entry_id)

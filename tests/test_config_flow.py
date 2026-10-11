@@ -142,7 +142,7 @@ async def _add(hass: HomeAssistant, entry: MockConfigEntry, kind: str) -> FlowRe
     """Open the menu, choose Add field and the kind of source."""
     result = await _choose(hass, await _menu(hass, entry), "add_field")
     assert result["type"] is FlowResultType.MENU
-    assert result["menu_options"] == ["add_sensor", "add_constant"]
+    assert result["menu_options"] == ["add_sensor", "add_constant", "add_download"]
     return await _choose(hass, result, kind)
 
 
@@ -175,7 +175,7 @@ async def test_add_sensor_field(recorder_mock, hass: HomeAssistant, sensors) -> 
     # The menu now lists it, and the used field is no longer offered.
     result = await _menu(hass, entry)
     assert result["menu_options"] == [
-        "add_field", "edit_field", "active_fields", "remove_field", "reupload",
+        "add_field", "edit_field", "fields", "remove_field", "reupload",
         "import_history", "settings",
     ]
     assert "Outside" in result["description_placeholders"]["fields"]
@@ -483,7 +483,7 @@ async def test_no_add_field_when_all_in_use(recorder_mock, hass: HomeAssistant) 
     )
     result = await _menu(hass, entry)
     assert "add_field" not in result["menu_options"]
-    assert result["menu_options"][:3] == ["edit_field", "active_fields", "remove_field"]
+    assert result["menu_options"][:3] == ["edit_field", "fields", "remove_field"]
     assert "Every field a standard account can send" in result["description_placeholders"]["fields"]
 
 
@@ -515,25 +515,50 @@ async def test_last_field_taken_after_the_menu(recorder_mock, hass: HomeAssistan
         assert result["reason"] == "no_free_fields"
 
 
-async def test_active_fields_on_one_page(recorder_mock, hass: HomeAssistant) -> None:
+def _modes(entry: MockConfigEntry) -> dict[str, str]:
+    """Return each field's mode as saved."""
+    return {
+        m["field"]: "download" if m.get("direction") == "download"
+        else "send" if m["active"] else "record_only"
+        for m in entry.options[CONF_FIELDS]
+    }
+
+
+async def test_fields_on_one_page(recorder_mock, hass: HomeAssistant) -> None:
     fields = [
         _mapping("v2", "sensor.power"),
         _mapping("v5", "sensor.outside") | {"active": False},
         _mapping("v6", "sensor.voltage"),
+        _mapping("b1", "sensor.battery"),
     ]
-    entry = options_entry(hass, fields=fields)
-    result = await _choose(hass, await _menu(hass, entry), "active_fields")
-    assert result["step_id"] == "active_fields"
-    assert select_options(result, "active_fields") == ["v2", "v5", "v6"]
+    entry = options_entry(hass, donor=True, fields=fields)
+    result = await _choose(hass, await _menu(hass, entry), "fields")
+    assert result["step_id"] == "fields"
+    assert select_options(result, "v2") == ["send", "record_only", "download"]
+    # PVOutput does not return battery fields.
+    assert select_options(result, "b1") == ["send", "record_only"]
 
-    result = await _configure(hass, result, {"active_fields": ["v5", "v6"]})
+    result = await _configure(
+        hass, result, {"v2": "download", "v5": "send", "v6": "record_only", "b1": "send"}
+    )
     assert result["type"] is FlowResultType.CREATE_ENTRY
-    assert {m["field"]: m["active"] for m in entry.options[CONF_FIELDS]} == {
-        "v2": False, "v5": True, "v6": True,
+    assert _modes(entry) == {
+        "v2": "download", "v5": "send", "v6": "record_only", "b1": "send",
     }
+    # The upload source is kept while downloading.
+    assert entry.options[CONF_FIELDS][0]["entity_id"] == "sensor.power"
 
 
-async def test_active_fields_keep_changes_made_elsewhere(
+async def test_fields_extended_download_needs_donor(recorder_mock, hass: HomeAssistant) -> None:
+    entry = options_entry(
+        hass, fields=[_mapping("v2", "sensor.power"), _mapping("v7", "sensor.x")]
+    )
+    result = await _choose(hass, await _menu(hass, entry), "fields")
+    assert select_options(result, "v2") == ["send", "record_only", "download"]
+    assert select_options(result, "v7") == ["send", "record_only"]
+
+
+async def test_fields_keep_changes_made_elsewhere(
     recorder_mock, hass: HomeAssistant
 ) -> None:
     fields = [
@@ -541,16 +566,95 @@ async def test_active_fields_keep_changes_made_elsewhere(
         _mapping("v5", "sensor.outside") | {"active": False},
     ]
     entry = options_entry(hass, fields=fields)
-    result = await _choose(hass, await _menu(hass, entry), "active_fields")
+    result = await _choose(hass, await _menu(hass, entry), "fields")
 
-    # While the page is open, v5 is switched on elsewhere (e.g. its switch).
+    # While the page is open, v5 is switched on elsewhere (e.g. its select).
     hass.config_entries.async_update_entry(
         entry,
         options=dict(entry.options)
         | {CONF_FIELDS: [fields[0], fields[1] | {"active": True}]},
     )
-    # The page still shows v5 off; only v2 is unticked on it.
-    result = await _configure(hass, result, {"active_fields": []})
-    assert {m["field"]: m["active"] for m in entry.options[CONF_FIELDS]} == {
-        "v2": False, "v5": True,
+    # The page still shows v5 as Record only; only v2 is changed on it.
+    result = await _configure(hass, result, {"v2": "record_only", "v5": "record_only"})
+    assert _modes(entry) == {"v2": "record_only", "v5": "send"}
+
+
+def _download(field: str) -> dict[str, Any]:
+    return {
+        "field": field, "entity_id": None, "constant": None, "name": field,
+        "active": True, "aggregate": "average", "direction": "download",
     }
+
+
+async def test_fields_ask_for_a_source(
+    recorder_mock, hass: HomeAssistant, sensors
+) -> None:
+    entry = options_entry(hass, fields=[_download("v2"), _download("v5")])
+    result = await _choose(hass, await _menu(hass, entry), "fields")
+    result = await _configure(hass, result, {"v2": "send", "v5": "record_only"})
+    assert result["step_id"] == "field_source"
+    assert result["description_placeholders"]["field"] == "v2 · Power Generation"
+
+    # One of the two, not both.
+    result = await _configure(hass, result, {"entity_id": "sensor.power", "constant": 5})
+    assert result["errors"] == {"base": "entity_or_constant"}
+    result = await _configure(hass, result, {"entity_id": "sensor.outside"})
+    assert result["errors"] == {"base": "unit_mismatch"}
+    result = await _configure(hass, result, {"entity_id": "sensor.power"})
+
+    assert result["step_id"] == "field_source"
+    assert result["description_placeholders"]["field"] == "v5 · Temperature"
+    result = await _configure(hass, result, {"constant": 21.5})
+    assert result["type"] is FlowResultType.CREATE_ENTRY
+    by_field = {m["field"]: m for m in entry.options[CONF_FIELDS]}
+    assert by_field["v2"]["entity_id"] == "sensor.power"
+    assert by_field["v5"]["constant"] == 21.5
+    assert _modes(entry) == {"v2": "send", "v5": "record_only"}
+
+
+async def test_add_download(recorder_mock, hass: HomeAssistant) -> None:
+    entry = options_entry(
+        hass, donor=True, fields=[_mapping("v2", "sensor.power"), _mapping("b1", "sensor.b")]
+    )
+    result = await _add(hass, entry, "add_download")
+    assert result["step_id"] == "add_download"
+    offered = select_options(result, "field")
+    assert "v2" not in offered
+    assert "v7" in offered
+    assert not any(f.startswith("b") for f in offered)
+
+    result = await _configure(hass, result, {"field": "v7", "name": "Grid", "source_unit": "A"})
+    assert result["type"] is FlowResultType.CREATE_ENTRY
+    assert entry.options[CONF_FIELDS][-1] == {
+        "field": "v7", "entity_id": None, "constant": None, "name": "Grid",
+        "active": True, "aggregate": "average", "direction": "download",
+        "source_unit": "A",
+    }
+
+
+async def test_edit_download_field_gets_a_source(
+    recorder_mock, hass: HomeAssistant, sensors
+) -> None:
+    entry = options_entry(hass, fields=[_download("v2")])
+    result = await _choose(hass, await _menu(hass, entry), "edit_field")
+    result = await _configure(hass, result, {"field": "v2"})
+    assert result["step_id"] == "edit_details"
+
+    # Leaving both empty keeps it download only.
+    result = await _configure(
+        hass, result, {"name": "Power", "active": True, "aggregate": "average"}
+    )
+    assert result["type"] is FlowResultType.CREATE_ENTRY
+    assert entry.options[CONF_FIELDS][0]["entity_id"] is None
+
+    result = await _choose(hass, await _menu(hass, entry), "edit_field")
+    result = await _configure(hass, result, {"field": "v2"})
+    result = await _configure(
+        hass, result,
+        {"entity_id": "sensor.power", "name": "Power", "active": True, "aggregate": "last"},
+    )
+    assert result["type"] is FlowResultType.CREATE_ENTRY
+    mapping = entry.options[CONF_FIELDS][0]
+    assert mapping["entity_id"] == "sensor.power"
+    assert mapping["aggregate"] == "last"
+    assert mapping["direction"] == "download"

@@ -52,6 +52,7 @@ from .const import (
     CONF_UPLOAD_INTERVAL,
     DEFAULT_INTERVAL_MINUTES,
     DEFAULT_RETENTION_DAYS,
+    DIRECTION_DOWNLOAD,
     DOMAIN,
     DONOR_AUTO,
     DONOR_NO,
@@ -64,10 +65,16 @@ from .const import (
     MAP_ACTIVE,
     MAP_AGGREGATE,
     MAP_CONSTANT,
+    MAP_DIRECTION,
     MAP_ENTITY,
     MAP_FIELD,
     MAP_NAME,
     MAP_UNIT,
+    MODE_DOWNLOAD,
+    MODE_RECORD,
+    MODE_SEND,
+    apply_mode,
+    downloadable,
     upload_unit,
     UPLOAD_INTERVALS,
 )
@@ -82,7 +89,6 @@ from .services import (
 )
 from .uploader import REUPLOAD_AUTO, REUPLOAD_OUTPUTS, REUPLOAD_STATUSES, Uploader
 
-CONF_ACTIVE_FIELDS = "active_fields"
 ATTR_FROM = "from"
 FROM_FAILURE = "since_failure"
 FROM_TIME = "from_time"
@@ -165,8 +171,9 @@ class PVOutputUploaderOptionsFlow(OptionsFlow):
         self._options: dict[str, Any] = {}
         self._new: dict[str, Any] = {}
         self._edit_field: str | None = None
-        # Fields shown as active on the Active fields page.
-        self._shown_active: set[str] = set()
+        # Modes shown on the Fields page, and fields still needing a source.
+        self._shown_modes: dict[str, str] = {}
+        self._needs_source: list[tuple[str, str]] = []
 
     @property
     def _fields(self) -> list[dict[str, Any]]:
@@ -221,14 +228,19 @@ class PVOutputUploaderOptionsFlow(OptionsFlow):
             field = FIELDS_BY_KEY[m[MAP_FIELD]]
             if m.get(MAP_ENTITY):
                 source = f"`{m[MAP_ENTITY]}`, {m.get(MAP_AGGREGATE) or field.default_aggregate}"
-            else:
+            elif m.get(MAP_CONSTANT) is not None:
                 source = f"constant {m.get(MAP_CONSTANT)}"
+            else:
+                source = "no source in Home Assistant"
             unit = upload_unit(field.key, m.get(MAP_AGGREGATE), m.get(MAP_UNIT))
             if unit:
                 source += f" {unit}"
-            state = "active" if m.get(MAP_ACTIVE, True) else "passive"
+            if m.get(MAP_DIRECTION) == DIRECTION_DOWNLOAD:
+                state = "download from PVOutput"
+            else:
+                state = "active" if m.get(MAP_ACTIVE, True) else "passive"
             if field.donor and not donor:
-                state += ", needs a donor account so not sent"
+                state += ", needs a donor account"
             lines.append(
                 f"- **{field.key}** {m.get(MAP_NAME) or field.name}: {source} ({state})"
             )
@@ -299,7 +311,7 @@ class PVOutputUploaderOptionsFlow(OptionsFlow):
             # Nothing left to add: no Add field, and say why.
             fields += "\n\n" + self._all_in_use()
         if self._fields:
-            menu += ["edit_field", "active_fields", "remove_field"]
+            menu += ["edit_field", "fields", "remove_field"]
         menu += ["reupload", "import_history", "settings"]
         detected = self.config_entry.data.get(CONF_DETECTED_INTERVAL, DEFAULT_INTERVAL_MINUTES)
         return self.async_show_menu(
@@ -359,7 +371,7 @@ class PVOutputUploaderOptionsFlow(OptionsFlow):
         if not self._field_available_any():
             return self.async_abort(reason="no_free_fields")
         return self.async_show_menu(
-            step_id="add_field", menu_options=["add_sensor", "add_constant"]
+            step_id="add_field", menu_options=["add_sensor", "add_constant", "add_download"]
         )
 
     async def async_step_add_sensor(
@@ -522,12 +534,18 @@ class PVOutputUploaderOptionsFlow(OptionsFlow):
         fdef = FIELDS_BY_KEY[field]
         mapping = self._mapping(field)
         is_sensor = bool(mapping.get(MAP_ENTITY))
+        # A download-only field may be given a sensor or a fixed value (or neither).
+        no_source = not _has_source(mapping)
         errors: dict[str, str] = {}
         if user_input is not None:
             aggregate = user_input.get(
                 MAP_AGGREGATE, mapping.get(MAP_AGGREGATE) or fdef.default_aggregate
             )
-            if is_sensor and (
+            if no_source:
+                is_sensor = bool(user_input.get(MAP_ENTITY))
+            if no_source and is_sensor and user_input.get(MAP_CONSTANT) is not None:
+                errors["base"] = "entity_or_constant"
+            elif is_sensor and (
                 error := self._unit_error(field, user_input[MAP_ENTITY], aggregate, user_input.get(MAP_UNIT, "").strip() or None)
             ):
                 errors["base"] = error
@@ -545,15 +563,20 @@ class PVOutputUploaderOptionsFlow(OptionsFlow):
                     mapping.pop(MAP_UNIT, None)
                 if is_sensor:
                     mapping[MAP_ENTITY] = user_input[MAP_ENTITY]
-                else:
+                elif user_input.get(MAP_CONSTANT) is not None:
                     mapping[MAP_CONSTANT] = _constant_value(field, user_input[MAP_CONSTANT])
                 return self._save()
-        source: dict[Any, Any] = (
-            {vol.Required(MAP_ENTITY): ENTITY_SELECTOR}
-            if is_sensor
-            else {vol.Required(MAP_CONSTANT): self._constant_selector(field)}
-        )
-        schema = vol.Schema(source | self._details_schema(field, is_sensor))
+        source: dict[Any, Any]
+        if no_source:
+            source = {
+                vol.Optional(MAP_ENTITY): ENTITY_SELECTOR,
+                vol.Optional(MAP_CONSTANT): self._constant_selector(field),
+            }
+        elif is_sensor:
+            source = {vol.Required(MAP_ENTITY): ENTITY_SELECTOR}
+        else:
+            source = {vol.Required(MAP_CONSTANT): self._constant_selector(field)}
+        schema = vol.Schema(source | self._details_schema(field, is_sensor or no_source))
         defaults = user_input or {
             k: v for k, v in mapping.items() if v is not None and k != MAP_FIELD
         }
@@ -566,48 +589,138 @@ class PVOutputUploaderOptionsFlow(OptionsFlow):
             errors=errors,
         )
 
-    async def async_step_active_fields(
+    async def async_step_fields(
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
-        """Make fields active (sent) or passive (recorded only) on one page."""
+        """Send, Record only or Download for every field, on one page.
+
+        Choosing Send or Record only for a field with no source in Home
+        Assistant (added as download only) asks for one next.
+        """
         if user_input is not None:
-            # Only the ticks changed on this page are applied, to the configuration
-            # as saved now: a field switched elsewhere meanwhile keeps that change.
-            ticked = set(user_input[CONF_ACTIVE_FIELDS])
-            turned_on = ticked - self._shown_active
-            turned_off = self._shown_active - ticked
+            # Only the choices changed on this page are applied, to the
+            # configuration as saved now: a field changed elsewhere meanwhile keeps
+            # that change.
+            changed = {
+                field: mode
+                for field, mode in user_input.items()
+                if mode != self._shown_modes.get(field)
+            }
             self._options = deepcopy(DEFAULT_OPTIONS) | deepcopy(dict(self.config_entry.options))
+            self._needs_source = []
             for mapping in self._fields:
-                if mapping[MAP_FIELD] in turned_on:
-                    mapping[MAP_ACTIVE] = True
-                elif mapping[MAP_FIELD] in turned_off:
-                    mapping[MAP_ACTIVE] = False
+                mode = changed.get(mapping[MAP_FIELD])
+                if mode is None:
+                    continue
+                if mode != MODE_DOWNLOAD and not _has_source(mapping):
+                    self._needs_source.append((mapping[MAP_FIELD], mode))
+                else:
+                    apply_mode(mapping, mode)
+            if self._needs_source:
+                return await self.async_step_field_source()
             return self._save()
         order = {key: n for n, key in enumerate(FIELD_KEYS)}
         fields = sorted(self._fields, key=lambda m: order[m[MAP_FIELD]])
-        self._shown_active = {m[MAP_FIELD] for m in fields if m.get(MAP_ACTIVE, True)}
+        self._shown_modes = {m[MAP_FIELD]: _mode(m) for m in fields}
+        donor = self._donor()
+        schema: dict[Any, Any] = {}
+        for m in fields:
+            modes = [MODE_SEND, MODE_RECORD]
+            fdef = FIELDS_BY_KEY[m[MAP_FIELD]]
+            # v7-v12 are downloaded for donors only; a field already set to
+            # Download keeps the option so the page can show it.
+            if downloadable(fdef.key) and (
+                donor or not fdef.donor or _mode(m) == MODE_DOWNLOAD
+            ):
+                modes.append(MODE_DOWNLOAD)
+            schema[vol.Required(m[MAP_FIELD], default=_mode(m))] = SelectSelector(
+                SelectSelectorConfig(
+                    options=modes,
+                    translation_key="field_mode",
+                    mode=SelectSelectorMode.DROPDOWN,
+                )
+            )
         return self.async_show_form(
-            step_id="active_fields",
+            step_id="fields",
+            data_schema=vol.Schema(schema),
+            description_placeholders={"fields": self._describe()},
+        )
+
+    async def async_step_field_source(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Ask for the source of a download-only field set to Send or Record only."""
+        field, mode = self._needs_source[0]
+        fdef = FIELDS_BY_KEY[field]
+        errors: dict[str, str] = {}
+        if user_input is not None:
+            entity_id = user_input.get(MAP_ENTITY)
+            constant = user_input.get(MAP_CONSTANT)
+            if bool(entity_id) == (constant is not None):
+                errors["base"] = "entity_or_constant"
+            elif entity_id and (
+                error := self._unit_error(field, entity_id, fdef.default_aggregate)
+            ) == "unit_mismatch":
+                errors["base"] = error
+            else:
+                mapping = self._mapping(field)
+                if entity_id:
+                    mapping[MAP_ENTITY] = entity_id
+                else:
+                    mapping[MAP_CONSTANT] = _constant_value(field, constant)
+                apply_mode(mapping, mode)
+                self._needs_source.pop(0)
+                if self._needs_source:
+                    return await self.async_step_field_source()
+                return self._save()
+        return self.async_show_form(
+            step_id="field_source",
             data_schema=vol.Schema(
                 {
-                    vol.Optional(
-                        CONF_ACTIVE_FIELDS,
-                        default=[m[MAP_FIELD] for m in fields if m.get(MAP_ACTIVE, True)],
-                    ): SelectSelector(
-                        SelectSelectorConfig(
-                            options=[
-                                SelectOptionDict(
-                                    value=m[MAP_FIELD],
-                                    label=f"{m[MAP_FIELD]} · {m.get(MAP_NAME) or FIELDS_BY_KEY[m[MAP_FIELD]].name}",
-                                )
-                                for m in fields
-                            ],
-                            multiple=True,
-                            mode=SelectSelectorMode.LIST,
-                        )
-                    )
+                    vol.Optional(MAP_ENTITY): ENTITY_SELECTOR,
+                    vol.Optional(MAP_CONSTANT): self._constant_selector(field),
                 }
             ),
+            description_placeholders={"field": f"{field} · {fdef.name}"},
+            errors=errors,
+        )
+
+    async def async_step_add_download(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """A field read from PVOutput (no source in Home Assistant needed)."""
+        errors: dict[str, str] = {}
+        if user_input is not None:
+            field = user_input[MAP_FIELD]
+            if not self._field_available(field) or not downloadable(field):
+                errors[MAP_FIELD] = "field_unavailable"
+            else:
+                new = {
+                    MAP_FIELD: field,
+                    MAP_ENTITY: None,
+                    MAP_CONSTANT: None,
+                    MAP_NAME: user_input.get(MAP_NAME) or FIELDS_BY_KEY[field].name,
+                    MAP_ACTIVE: True,
+                    MAP_AGGREGATE: FIELDS_BY_KEY[field].default_aggregate,
+                    MAP_DIRECTION: DIRECTION_DOWNLOAD,
+                }
+                if unit := user_input.get(MAP_UNIT, "").strip():
+                    new[MAP_UNIT] = unit
+                return self._add_field(new)
+        free = [f for f in self._free_fields() if downloadable(f)]
+        if not free:
+            return self.async_abort(reason="no_free_fields")
+        schema = vol.Schema(
+            {
+                vol.Required(MAP_FIELD): self._field_selector(free, SelectSelectorMode.DROPDOWN),
+                vol.Optional(MAP_NAME): TextSelector(),
+                vol.Optional(MAP_UNIT): TextSelector(),
+            }
+        )
+        return self.async_show_form(
+            step_id="add_download",
+            data_schema=self.add_suggested_values_to_schema(schema, user_input or {}),
+            errors=errors,
         )
 
     async def async_step_remove_field(
@@ -875,3 +988,15 @@ def _constant_value(field: str, value: Any) -> float | int:
     if field == BATTERY_STATE:
         return int(value)
     return value
+
+
+def _has_source(mapping: dict[str, Any]) -> bool:
+    """Return whether a field has an HA sensor or fixed value to upload."""
+    return bool(mapping.get(MAP_ENTITY)) or mapping.get(MAP_CONSTANT) is not None
+
+
+def _mode(mapping: dict[str, Any]) -> str:
+    """Return a field's mode: send, record_only or download."""
+    if mapping.get(MAP_DIRECTION) == DIRECTION_DOWNLOAD:
+        return MODE_DOWNLOAD
+    return MODE_SEND if mapping.get(MAP_ACTIVE, True) else MODE_RECORD

@@ -15,6 +15,7 @@ from custom_components.pvoutput_uploader.api import (
     PVOutputClient,
     PVOutputConnectionError,
     PVOutputRateLimited,
+    parse_status,
 )
 
 SYSTEM = (
@@ -134,3 +135,30 @@ async def test_batch_output_goes_to_addoutput(
     method, url, data, _ = aioclient_mock.mock_calls[0]
     assert str(url) == BASE_URL + "addoutput.jsp"
     assert data == {"data": "20261001,100;20261002,200"}
+
+
+def test_parse_status() -> None:
+    # As getstatus.jsp answers: v1-v4, normalised output, v5, v6, then v7-v12 with ext=1.
+    reading = parse_status("20261011,10:30,4210,1520,NaN,NaN,0.338,18.5,241.2,1.5,NaN,NaN,NaN,NaN,7")
+    assert reading.date == "20261011"
+    assert reading.time == "10:30"
+    assert reading.efficiency == 0.338
+    assert reading.values == {
+        "v1": 4210.0, "v2": 1520.0, "v3": None, "v4": None, "v5": 18.5, "v6": 241.2,
+        "v7": 1.5, "v8": None, "v9": None, "v10": None, "v11": None, "v12": 7.0,
+    }
+    # Without ext=1 there is no v7-v12.
+    assert set(parse_status("20261011,10:30,1,2,3,4,0.1,5,6").values) == {
+        "v1", "v2", "v3", "v4", "v5", "v6",
+    }
+
+
+async def test_get_status(hass: HomeAssistant, aioclient_mock: AiohttpClientMocker) -> None:
+    aioclient_mock.get(
+        BASE_URL + "getstatus.jsp", text="20261011,10:30,4210,1520,NaN,NaN,0.338,18.5,241.2"
+    )
+    reading = await client(hass).get_status(extended=True)
+    assert reading.values["v2"] == 1520.0
+    method, url, _, _ = aioclient_mock.mock_calls[0]
+    assert method == "GET"
+    assert url.query["ext"] == "1"

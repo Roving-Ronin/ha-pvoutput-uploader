@@ -29,11 +29,11 @@
     "step": {
       "init": {
         "title": "PVOutput Uploader",
-        "description": "Account: **{account}**, PVOutput status interval {detected_interval} min.\n\n**Fields**\n{fields}\n\nAll fields are recorded every 5 minutes into the history log; only **active** ones are sent. **Reupload history** sends recorded days again (e.g. after making a field active); **Import history** fills the log for a time before the integration was installed. Each action saves when you submit it.",
+        "description": "Account: **{account}**, PVOutput status interval {detected_interval} min.\n\n**Fields**\n{fields}\n\nUpload fields are recorded every 5 minutes into the history log; only **active** (Send) ones are sent. Download fields are read from PVOutput into sensors. **Fields** sets each one to Send, Record only or Download. **Reupload history** sends recorded days again (e.g. after making a field active); **Import history** fills the log for a time before the integration was installed. Each action saves when you submit it.",
         "menu_options": {
           "add_field": "Add field",
           "edit_field": "Edit field",
-          "active_fields": "Active fields",
+          "fields": "Fields: send, record or download",
           "remove_field": "Remove fields",
           "reupload": "Reupload history",
           "import_history": "Import history from Home Assistant",
@@ -42,10 +42,24 @@
       },
       "add_field": {
         "title": "Add field",
-        "description": "Where does the value come from?\n\n- **A sensor**: a Home Assistant sensor, recorded every 5 minutes, e.g. a temperature or battery power.\n- **A fixed value**: the same number in every status, e.g. the battery size (b3).",
+        "description": "Where does the value come from?\n\n- **A sensor**: a Home Assistant sensor, recorded every 5 minutes, e.g. a temperature or battery power.\n- **A fixed value**: the same number in every status, e.g. the battery size (b3).\n- **From PVOutput**: read the field's latest value from PVOutput into a sensor (download, nothing is sent).",
         "menu_options": {
           "add_sensor": "A sensor",
-          "add_constant": "A fixed value"
+          "add_constant": "A fixed value",
+          "add_download": "From PVOutput"
+        }
+      },
+      "add_download": {
+        "title": "Add field from PVOutput",
+        "description": "The field's latest value is read from PVOutput (getstatus) once per upload interval into a sensor named \"<field> <name> from PVOutput\", next to a Normalised output sensor. Battery fields (b1-b6) are not returned by PVOutput, so they are not listed; extended fields (v7-v12) need a donor account. To upload the field later, set it to Send under **Fields** and give it a sensor or fixed value.",
+        "data": {
+          "field": "PVOutput field",
+          "name": "Name in PVOutput",
+          "source_unit": "Unit"
+        },
+        "data_description": {
+          "name": "Optional; defaults to PVOutput's name for the field.",
+          "source_unit": "Only for user-defined extended fields (v7-v12), which have no fixed unit."
         }
       },
       "add_sensor": {
@@ -108,7 +122,7 @@
       },
       "edit_details": {
         "title": "{field}",
-        "description": "Changes apply to new values; recorded history keeps what was logged.",
+        "description": "Changes apply to new values; recorded history keeps what was logged. A field downloaded from PVOutput keeps its sensor or fixed value here, used when it is set back to Send or Record only; a field added from PVOutput can be given one (leave both empty to keep it download only).",
         "data": {
           "entity_id": "Sensor",
           "constant": "Value",
@@ -123,11 +137,40 @@
           "source_unit": "For sensors without a unit, enter the actual source unit (e.g. kW, kWh, °C or °F). A sensor's reported unit takes precedence. Fixed values use PVOutput's unit; this sets the unit only for user-defined extended fields."
         }
       },
-      "active_fields": {
-        "title": "Active fields",
-        "description": "Ticked fields are active (sent to PVOutput); unticked ones are passive: still recorded, not sent. Their history can be sent later with Reupload history. Each field also has a switch on the device page.",
+      "fields": {
+        "title": "Fields",
+        "description": "{fields}\n\n- **Send**: recorded and sent to PVOutput (active).\n- **Record only**: recorded, not sent (passive); its history can be sent later with Reupload history.\n- **Download**: read from PVOutput into a sensor; nothing is sent. The sensor or fixed value stays configured, so switching back restores it.\n\nA field added from PVOutput has no source yet: setting it to Send or Record only asks for one next. Each field also has a select on the device page.",
         "data": {
-          "active_fields": "Send to PVOutput"
+          "v1": "v1 · Energy Generation",
+          "v2": "v2 · Power Generation",
+          "v3": "v3 · Energy Consumption",
+          "v4": "v4 · Power Consumption",
+          "v5": "v5 · Temperature",
+          "v6": "v6 · Voltage",
+          "v7": "v7 · Extended 7",
+          "v8": "v8 · Extended 8",
+          "v9": "v9 · Extended 9",
+          "v10": "v10 · Extended 10",
+          "v11": "v11 · Extended 11",
+          "v12": "v12 · Extended 12",
+          "b1": "b1 · Battery Power",
+          "b2": "b2 · Battery State of Charge",
+          "b3": "b3 · Battery Size",
+          "b4": "b4 · Battery Lifetime Charge",
+          "b5": "b5 · Battery Lifetime Discharge",
+          "b6": "b6 · Battery State"
+        }
+      },
+      "field_source": {
+        "title": "{field}",
+        "description": "{field} has no source in Home Assistant yet. Pick a sensor or enter a fixed value to upload it.",
+        "data": {
+          "entity_id": "Sensor",
+          "constant": "Fixed value"
+        },
+        "data_description": {
+          "entity_id": "Recorded every 5 minutes; how its values are combined can be changed under Edit field.",
+          "constant": "Sent with every status, in PVOutput's unit for the field."
         }
       },
       "remove_field": {
@@ -196,7 +239,8 @@
       "end_before_start": "The end must be after the start.",
       "nothing_unsent": "Everything recorded has been sent. Choose a date and time instead.",
       "start_required": "Enter the date and time to start from.",
-      "unit_required": "This sensor has no unit. Enter its source unit before saving."
+      "unit_required": "This sensor has no unit. Enter its source unit before saving.",
+      "entity_or_constant": "Pick either a sensor or a fixed value (one of them)."
     },
     "abort": {
       "no_free_fields": "Every PVOutput field this PV site can send is already configured. Edit or remove a field to change what is sent; extended and battery fields need a donor account.",
@@ -207,6 +251,13 @@
     }
   },
   "selector": {
+    "field_mode": {
+      "options": {
+        "send": "Send",
+        "record_only": "Record only",
+        "download": "Download"
+      }
+    },
     "aggregate": {
       "options": {
         "average": "Average over the interval",
@@ -282,6 +333,18 @@
       },
       "last_error": {
         "name": "Last error"
+      },
+      "normalised_output": {
+        "name": "Normalised output from PVOutput"
+      }
+    },
+    "select": {
+      "field_mode": {
+        "state": {
+          "send": "Send",
+          "record_only": "Record only",
+          "download": "Download"
+        }
       }
     },
     "button": {
