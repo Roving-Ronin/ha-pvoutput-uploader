@@ -270,7 +270,7 @@ async def _build_in_two_reads(
     was delayed. The fake recorder answers like the real one: the state in
     force at the start (its time clamped later), then the states in range.
     """
-    t0 = states[0].last_updated.timestamp() // 300 * 300 + 300
+    t0 = int(states[0].last_updated.timestamp()) // 300 * 300 + 300
     visible = list(states)
 
     def fake_history(hass_, start, end, entity_ids, **kwargs):
