@@ -256,3 +256,87 @@ async def test_unitless_statistics_use_fallback_without_double_conversion(hass: 
     ):
         hours = await async_build_from_statistics(hass, sources, dt_util.utc_from_timestamp(hour), dt_util.utc_from_timestamp(hour + 3600))
     assert hours == [(hour + 3600, {"v2": 2000.0, "v4": 2000.0})]
+
+
+async def _build_in_two_reads(
+    hass: HomeAssistant,
+    states: list[State],
+    late: State | None,
+    baselines: dict[str, float] | None,
+) -> list[float]:
+    """Build (t0, t0+300] and then (t0+300, t0+600], like two recording cycles.
+
+    ``late`` reaches the recorder only after the first read, as when its write
+    was delayed. The fake recorder answers like the real one: the state in
+    force at the start (its time clamped later), then the states in range.
+    """
+    t0 = states[0].last_updated.timestamp() // 300 * 300 + 300
+    visible = list(states)
+
+    def fake_history(hass_, start, end, entity_ids, **kwargs):
+        s, e = start.timestamp(), end.timestamp()
+        ordered = sorted(visible, key=lambda st: st.last_updated)
+        before = [st for st in ordered if st.last_updated.timestamp() <= s]
+        inside = [st for st in ordered if s < st.last_updated.timestamp() <= e]
+        return {"sensor.energy": before[-1:] + inside}
+
+    hass.states.async_set("sensor.energy", "1.0", {"unit_of_measurement": "kWh"})
+    sources = [Source("v1", "sensor.energy", AGG_ENERGY_TODAY)]
+    energy = []
+    with (
+        patch.object(builder, "get_instance", return_value=_FakeRecorder(hass)),
+        patch.object(builder.history, "get_significant_states", side_effect=fake_history),
+    ):
+        for start in (t0, t0 + 300):
+            samples = await async_build_from_states(hass, sources, start, start + 300, baselines)
+            energy += [s.values["v1"] or 0.0 for s in samples]
+            if late is not None and late not in visible:
+                visible.append(late)
+    return energy
+
+
+def _energy_states(t0: float, *values: tuple[float, str]) -> list[State]:
+    return [_state("sensor.energy", v, t0 + dt) for dt, v in values]
+
+
+@pytest.mark.parametrize("carry", [False, True])
+async def test_state_written_late_is_not_lost(hass: HomeAssistant, carry: bool) -> None:
+    t0 = 1_800_000_000 - 1_800_000_000 % 300
+    states = _energy_states(t0, (-10, "1.000"), (100, "1.010"), (400, "1.030"))
+    # 1.020 at t0+250 reaches the recorder after the first read.
+    late = _state("sensor.energy", "1.020", t0 + 250)
+    energy = await _build_in_two_reads(hass, states, late, {} if carry else None)
+    if carry:
+        # Recording carries the counter's last value: the full 30 Wh.
+        assert sum(energy) == pytest.approx(30.0)
+    else:
+        # Without it (as before), the 10 Wh up to the late state was lost.
+        assert sum(energy) == pytest.approx(20.0)
+
+
+@pytest.mark.parametrize("carry", [False, True])
+async def test_unavailable_at_the_boundary_is_not_lost(hass: HomeAssistant, carry: bool) -> None:
+    t0 = 1_800_000_000 - 1_800_000_000 % 300
+    states = _energy_states(
+        t0, (-10, "1.000"), (100, "1.010"), (250, "unavailable"), (400, "1.030")
+    )
+    energy = await _build_in_two_reads(hass, states, None, {} if carry else None)
+    assert sum(energy) == pytest.approx(30.0 if carry else 10.0)
+
+
+async def test_carried_value_needs_a_known_state_at_the_start(hass: HomeAssistant) -> None:
+    t0 = 1_800_000_000 - 1_800_000_000 % 300
+    # The recorder has nothing in force at the start (purged): the old carried
+    # value is not used, so days of counting cannot land in one slot.
+    hass.states.async_set("sensor.energy", "1.0", {"unit_of_measurement": "kWh"})
+    sources = [Source("v1", "sensor.energy", AGG_ENERGY_TODAY)]
+    baselines = {"v1|sensor.energy|": 500.0}
+    recorded = {"sensor.energy": [_state("sensor.energy", "9.000", t0 + 100)]}
+    with (
+        patch.object(builder, "get_instance", return_value=_FakeRecorder(hass)),
+        patch.object(builder.history, "get_significant_states", return_value=recorded),
+    ):
+        samples = await async_build_from_states(hass, sources, t0, t0 + 300, baselines)
+    assert samples[0].values["v1"] == pytest.approx(0.0)
+    # From now on the new value is carried.
+    assert baselines == {"v1|sensor.energy|": 9000.0}

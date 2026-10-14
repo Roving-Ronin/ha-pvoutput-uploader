@@ -492,7 +492,7 @@ async def test_import_from_recorder(
     await add(up, last_built=local_ts(10, 10, 10, 15))
     state_row = local_ts(10, 10, 10, 5)
 
-    async def from_states(hass_, sources, start, end):
+    async def from_states(hass_, sources, start, end, baselines=None):
         return [Sample(state_row, {"v1": 7.0})] if start < state_row <= end else []
 
     async def from_statistics(hass_, sources, start, end):
@@ -1067,7 +1067,7 @@ async def test_import_fills_a_partial_hour(
     recorded = local_ts(10, 10, 9, 5)
     await add(up, Sample(recorded, {"v1": 5.0}, DONE), last_built=local_ts(10, 10, 10, 15))
 
-    async def from_states(hass_, sources, start, end):
+    async def from_states(hass_, sources, start, end, baselines=None):
         return []
 
     async def from_statistics(hass_, sources, start, end):
@@ -1157,7 +1157,7 @@ async def test_import_keeps_recorded_energy_above_statistics(
         last_built=local_ts(10, 10, 10, 15),
     )
 
-    async def from_states(hass_, sources, start, end):
+    async def from_states(hass_, sources, start, end, baselines=None):
         return []
 
     async def from_statistics(hass_, sources, start, end):
@@ -1519,3 +1519,26 @@ async def test_last_upload_and_download_survive_a_reload(
     await again.async_load()
     assert again.last_upload == up.last_upload
     assert again.last_download == up.last_download
+
+
+async def test_recording_carries_counters_between_reads(
+    hass: HomeAssistant, tmp_path: Path, now: FrozenDateTimeFactory
+) -> None:
+    up = await make(hass, tmp_path, [field("v1", aggregate=AGG_ENERGY_TODAY)])
+    await up._run(up.store.set_meta, META_LAST_BUILT, str(local_ts(10, 10, 10, 0)))
+    seen = []
+
+    async def from_states(hass_, sources, start, end, baselines=None):
+        seen.append(dict(baselines))
+        baselines["v1|sensor.x|"] = 1000.0 + len(seen)
+        return []
+
+    with patch.object(uploader_module, "async_build_from_states", side_effect=from_states):
+        await up._async_record()
+        now.tick(300)
+        await up._async_record()
+        # Kept across a restart, in the log database.
+        again = await make(hass, tmp_path, [field("v1", aggregate=AGG_ENERGY_TODAY)])
+        now.tick(300)
+        await again._async_record()
+    assert seen == [{}, {"v1|sensor.x|": 1001.0}, {"v1|sensor.x|": 1002.0}]

@@ -87,6 +87,8 @@ _T = TypeVar("_T")
 META_LAST_BUILT = "last_built"
 META_PAUSED_UNTIL = "paused_until"
 META_LAST_UPLOAD = "last_upload"
+# Energy counters' last values, carried between recorder reads (builder).
+META_ENERGY_BASELINES = "energy_baselines"
 META_LAST_DOWNLOAD = "last_download"
 META_LAST_PURGE = "last_purge"
 # Statuses up to this slot end are sent in batches without battery values.
@@ -391,15 +393,25 @@ class Uploader:
         if not self.sources or last is None or last > target:
             # Nothing to read, or a first start: begin logging from now on.
             await self._run(self.store.set_meta, META_LAST_BUILT, str(target))
+            await self._run(self.store.set_meta, META_ENERGY_BASELINES, None)
             return
         last = _align_down(last, LOG_INTERVAL)
+        # Each energy counter's last value, carried from one read to the next so
+        # no increment across a read boundary is lost (see the builder).
+        raw = await self._run(self.store.get_meta, META_ENERGY_BASELINES)
+        baselines: dict[str, float] = json.loads(raw) if raw else {}
         for _ in range(MAX_CHUNKS_PER_CYCLE):
             if last >= target:
                 break
             end = min(target, last + HISTORY_CHUNK_SECONDS)
-            samples = await async_build_from_states(self.hass, self.sources, last, end)
+            samples = await async_build_from_states(
+                self.hass, self.sources, last, end, baselines
+            )
             await self._run(self.store.add_samples, samples)
             last = end
+            await self._run(
+                self.store.set_meta, META_ENERGY_BASELINES, json.dumps(baselines)
+            )
             await self._run(self.store.set_meta, META_LAST_BUILT, str(last))
 
     # Download
@@ -1087,10 +1099,12 @@ class Uploader:
             from_stats = 0
 
             t = start_ts
+            # Counters carried across the day boundaries of this import.
+            baselines: dict[str, float] = {}
             while t < end_ts:
                 chunk_end = min(end_ts, t + 86400)
                 samples = await async_build_from_states(
-                    self.hass, self.sources, t, chunk_end
+                    self.hass, self.sources, t, chunk_end, baselines
                 )
                 for s in samples:
                     s.uploaded = state

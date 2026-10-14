@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.1.9b1
+
+- **Fix: energy could be lost while recording** ([#3](https://github.com/darek-margas/ha-pvoutput-uploader/issues/3)). The log is filled from the recorder in small reads, usually one 5 minute slot a minute, and each read counted energy from the counter value in force at its start. When the counter was unavailable at a read boundary, or a state reached the recorder after the previous read, the increment across the boundary was counted by neither read, so the log, and PVOutput, fell behind the sensor. Each counter's last value is now carried from one read to the next and kept across restarts, so the increment lands in the next slot. Import history carries it across its day boundaries too.
+- **Repairing days already short:** **Configure → Import history from Home Assistant** for those days with *Replace recorded values* and *Send to PVOutput* on rebuilds them from the recorder (within its keep days, 10 by default) and sends them again (statuses within 14 days, 90 for donors).
+- **Connection errors name the error:** a timeout used to log `PVOutput upload stopped: addstatus.jsp:` with nothing after it; it now says e.g. `addstatus.jsp: TimeoutError`.
+
 ## 0.1.8
 
 Stable release of the 0.1.8 betas (b2, b3; b1 was not released): **PVOutput's history in Home Assistant statistics.**

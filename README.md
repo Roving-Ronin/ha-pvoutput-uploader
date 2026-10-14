@@ -458,7 +458,10 @@ with 4,657 still waiting to upload. The diagnostics show progress as the backlog
   value does not hold up the rest.
 - **Unavailable sensors** leave a gap in the log rather than a value: no average, no
   last value, and no energy for a slot with no counter reading. Energy is counted when
-  the counter reports again.
+  the counter reports again. Each energy counter's last value is carried from one read of
+  the recorder to the next (and kept across restarts), so an increment is never lost
+  at a read boundary: not when the counter was unavailable there, nor when a state
+  reached the recorder late.
 - **Rate limit.** The `X-Rate-Limit-*` headers of every answer are tracked, and the last
   5 requests of each hour are kept in hand: the limit belongs to the API key, so other
   uploaders using the same key (e.g. IoTaWatt) still have room. Current statuses (the last

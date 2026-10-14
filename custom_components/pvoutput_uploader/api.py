@@ -172,7 +172,9 @@ class PVOutputClient:
                 self._read_rate_headers(resp.headers)
                 status = resp.status
         except (aiohttp.ClientError, TimeoutError) as err:
-            raise PVOutputConnectionError(f"{service}: {err}") from err
+            # A timeout has no message: name the error so the log says what happened.
+            detail = f"{type(err).__name__}: {err}" if str(err) else type(err).__name__
+            raise PVOutputConnectionError(f"{service}: {detail}") from err
 
         _LOGGER.debug("%s -> %s %s", service, status, text[:200])
         if status == 200:

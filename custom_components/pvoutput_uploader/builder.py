@@ -99,14 +99,20 @@ def _convert(value: float, kind: str, unit: str | None) -> float:
 class _Series:
     """Step function of one sensor's values over time."""
 
-    def __init__(self, points: list[tuple[float, float | None]], energy: bool) -> None:
+    def __init__(
+        self,
+        points: list[tuple[float, float | None]],
+        energy: bool,
+        baseline: float | None = None,
+    ) -> None:
         self.ts = [p[0] for p in points]
         self.vals = [p[1] for p in points]
-        # For counters, a running total that ignores resets and small dips.
+        # For counters, a running total that ignores resets and small dips,
+        # counted from ``baseline`` (the last value seen before) when given.
         self.acc: list[float | None] = []
         if energy:
             total = 0.0
-            prev: float | None = None
+            prev: float | None = baseline
             for v in self.vals:
                 if v is not None:
                     if prev is None:
@@ -118,6 +124,10 @@ class _Series:
                         total += v
                         prev = v
                 self.acc.append(total if prev is not None else None)
+
+    def last_value(self) -> float | None:
+        """Return the newest value the sensor reported, unavailable ones skipped."""
+        return next((v for v in reversed(self.vals) if v is not None), None)
 
     def _index(self, t: float) -> int:
         return bisect_right(self.ts, t) - 1
@@ -181,13 +191,29 @@ def _unit(hass: HomeAssistant, entity_id: str) -> str | None:
     return state.attributes.get(ATTR_UNIT_OF_MEASUREMENT)
 
 
+def baseline_key(source: Source) -> str:
+    """Return the key of a counter's carried-over value (field, sensor, unit)."""
+    return f"{source.field}|{source.entity_id}|{source.unit or ''}"
+
+
 async def async_build_from_states(
-    hass: HomeAssistant, sources: list[Source], start: int, end: int
+    hass: HomeAssistant,
+    sources: list[Source],
+    start: int,
+    end: int,
+    baselines: dict[str, float] | None = None,
 ) -> list[Sample]:
     """Build samples for the 5 minute slots ending in (start, end].
 
     A slot gets a row only if at least one sensor reported in it, so periods
     when Home Assistant was down are left empty.
+
+    ``baselines`` carries each energy counter's last value from one call to
+    the next (read and updated in place). Without it, a call counts energy from
+    the value in force at ``start``, and an increment across the boundary is
+    lost when the counter was unavailable there, or when the recorder wrote a
+    state after the previous call had read it. With it, that increment is
+    counted in the first slot.
     """
     if not sources or end <= start:
         return []
@@ -218,22 +244,49 @@ async def async_build_from_states(
                 except ValueError:
                     value = None
             points.append((max(_state_ts(state), float(start)), value))
-        series[source] = _Series(points, source.aggregate == AGG_ENERGY_TODAY)
+        energy = source.aggregate == AGG_ENERGY_TODAY
+        # Carried over only when the recorder knows the state in force at
+        # ``start`` (unavailable or not): continuity with the previous call.
+        # Without it (purged history, a long outage) the old value could put
+        # days of counting into one slot.
+        known_at_start = bool(points) and points[0][0] == float(start)
+        baseline = (
+            baselines.get(baseline_key(source))
+            if energy and baselines and known_at_start
+            else None
+        )
+        series[source] = _Series(points, energy, baseline)
+
+    # Energy counted from the carried-over value up to the value in force at
+    # ``start``: it belongs to the first slot.
+    carry: dict[Source, float] = {}
+    for source, s in series.items():
+        i = s._index(float(start))
+        if s.acc and i >= 0 and (counted := s.acc[i]):
+            carry[source] = counted
 
     samples: list[Sample] = []
     for b in range(start + LOG_INTERVAL, end + 1, LOG_INTERVAL):
         a = b - LOG_INTERVAL
-        if not any(s.changed(a, b) for s in series.values()):
+        first = a == start and bool(carry)
+        if not first and not any(s.changed(a, b) for s in series.values()):
             continue
         values: dict[str, float | None] = {}
         for source, s in series.items():
             if source.aggregate == AGG_ENERGY_TODAY:
-                values[source.field] = s.delta(a, b)
+                value = s.delta(a, b)
+                if a == start and source in carry:
+                    value = (value or 0.0) + carry[source]
+                values[source.field] = value
             elif source.aggregate == AGG_LAST:
                 values[source.field] = s.last(b)
             else:
                 values[source.field] = s.average(a, b)
         samples.append(Sample(b, values, PENDING))
+    if baselines is not None:
+        for source, s in series.items():
+            if source.aggregate == AGG_ENERGY_TODAY and (v := s.last_value()) is not None:
+                baselines[baseline_key(source)] = v
     return samples
 
 
