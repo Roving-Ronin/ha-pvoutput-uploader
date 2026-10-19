@@ -252,6 +252,10 @@
           "import_settings": "Account type, upload interval, history retention and daily output fallback. Off: this site keeps its own."
         }
       },
+      "import_donor": {
+        "title": "Donor fields on a standard account",
+        "description": "This account is not a PVOutput donor, so {fields} cannot be sent or downloaded. Submit to keep them configured anyway: they start working when the account becomes a donor (reload the integration, or set Account type under Settings), and their field sensors say why they are not sent meanwhile. To leave them out, close this and remove them from the YAML."
+      },
       "import_map": {
         "title": "Sensors to pick",
         "description": "The configuration uses sensors this installation does not have:\n{missing}\n\nPick the sensor here that gives the same value. Left empty, the field is left out (a Download field is kept, without a sensor)."

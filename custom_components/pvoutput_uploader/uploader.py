@@ -392,8 +392,10 @@ class Uploader:
         last = int(stored) if stored else None
         if not self.sources or last is None or last > target:
             # Nothing to read, or a first start: begin logging from now on.
-            await self._run(self.store.set_meta, META_LAST_BUILT, str(target))
-            await self._run(self.store.set_meta, META_ENERGY_BASELINES, None)
+            await self._run(
+                self.store.set_metas,
+                {META_LAST_BUILT: str(target), META_ENERGY_BASELINES: None},
+            )
             return
         last = _align_down(last, LOG_INTERVAL)
         # Each energy counter's last value, carried from one read to the next so
@@ -409,10 +411,11 @@ class Uploader:
             )
             await self._run(self.store.add_samples, samples)
             last = end
+            # One checkpoint: the time read up to and the counters at that time.
             await self._run(
-                self.store.set_meta, META_ENERGY_BASELINES, json.dumps(baselines)
+                self.store.set_metas,
+                {META_LAST_BUILT: str(last), META_ENERGY_BASELINES: json.dumps(baselines)},
             )
-            await self._run(self.store.set_meta, META_LAST_BUILT, str(last))
 
     # Download
 

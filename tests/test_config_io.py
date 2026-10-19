@@ -157,6 +157,15 @@ def test_minimal_setup() -> None:
             "pvoutput_uploader: 1\nfields: []\nsettings:\n  upload_interval: 7",
             "import_bad_value",
         ),
+        # Quoted, so a string: bool("false") would be True.
+        (
+            'pvoutput_uploader: 1\nfields: []\nsettings:\n  daily_output_fallback: "false"',
+            "import_bad_value",
+        ),
+        # NaN, infinity and booleans are no fixed value.
+        ("pvoutput_uploader: 1\nfields:\n  - field: b3\n    constant: .nan", "import_bad_value"),
+        ("pvoutput_uploader: 1\nfields:\n  - field: b3\n    constant: .inf", "import_bad_value"),
+        ("pvoutput_uploader: 1\nfields:\n  - field: b3\n    constant: true", "import_bad_value"),
     ],
 )
 def test_parse_errors(text: str, key: str) -> None:

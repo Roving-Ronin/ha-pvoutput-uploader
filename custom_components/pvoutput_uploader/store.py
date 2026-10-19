@@ -135,6 +135,20 @@ class SampleStore:
                 "INSERT OR REPLACE INTO meta (key, value) VALUES (?, ?)", (key, value)
             )
 
+    def set_metas(self, values: dict[str, str | None]) -> None:
+        """Store or clear several settings in one transaction (one checkpoint)."""
+        assert self._conn is not None
+        with self._lock:
+            for key, value in values.items():
+                if value is None:
+                    self._conn.execute("DELETE FROM meta WHERE key = ?", (key,))
+                else:
+                    self._conn.execute(
+                        "INSERT OR REPLACE INTO meta (key, value) VALUES (?, ?)",
+                        (key, value),
+                    )
+            self._conn.commit()
+
     # Samples
 
     def add_samples(

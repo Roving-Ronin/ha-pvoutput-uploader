@@ -93,6 +93,11 @@ def test_meta(tmp_path: Path) -> None:
     assert store.get_meta("x") == "2"
     store.set_meta("x", None)
     assert store.get_meta("x") is None
+    # Several at once, in one transaction (the recording checkpoint).
+    store.set_meta("y", "old")
+    store.set_metas({"x": "3", "y": None})
+    assert store.get_meta("x") == "3"
+    assert store.get_meta("y") is None
     store.close()
 
 

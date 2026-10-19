@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.1.9b3
+
+Fixes from the review of 0.1.9b2:
+
+- **Import checks values strictly:** `daily_output_fallback` must be a YAML `true` or `false` (a quoted `"false"` used to count as on), and fixed values must be real numbers (`.nan`, `.inf` and `true` are refused).
+- **Merging checks only the fields it adds:** an imported field that is already configured here is not used, so its sensor no longer fails the import (e.g. on a unit).
+- **Donor-only fields on a standard account** can be imported after a confirmation screen saying they are configured but not sent or downloaded until the account is a donor.
+- **Recording checkpoint in one transaction:** the time read up to and the carried energy counters are saved together, so a crash cannot leave them out of step.
+
 ## 0.1.9b2
 
 - **Export and import configuration** ([#4](https://github.com/darek-margas/ha-pvoutput-uploader/issues/4)): **Configure → Export configuration** shows the site's fields and settings as YAML to copy (also the `pvoutput_uploader.export_config` action), never with the API key or system ID. **Configure → Import configuration** takes it in: add the missing fields or replace all, settings only when asked, and sensors this installation names differently picked on one screen. Everything is checked before it is saved.

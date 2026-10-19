@@ -25,6 +25,7 @@ Format (version 1)::
 from __future__ import annotations
 
 from dataclasses import dataclass, field as dataclass_field
+import math
 from typing import Any
 
 import yaml
@@ -156,9 +157,13 @@ def _parse_field(item: Any) -> dict[str, Any]:
         raise ConfigImportError("import_bad_value", f"{key} sensor: {sensor}")
     if constant is not None:
         try:
-            constant = float(constant)
+            number = float(constant)
         except (TypeError, ValueError):
-            raise ConfigImportError("import_bad_value", f"{key} constant: {constant}") from None
+            number = math.nan
+        # NaN and infinity (YAML .nan, .inf) are no measurement PVOutput can take.
+        if isinstance(constant, bool) or not math.isfinite(number):
+            raise ConfigImportError("import_bad_value", f"{key} constant: {constant}")
+        constant = number
         if key == BATTERY_STATE:
             if not constant.is_integer() or int(constant) not in BATTERY_STATE_CODES:
                 raise ConfigImportError("import_bad_value", f"{key} state: {constant}")
@@ -204,7 +209,10 @@ def _parse_settings(raw: Any) -> dict[str, Any]:
             raise ConfigImportError("import_bad_value", f"keep_history_days: {raw['keep_history_days']}")
         settings[CONF_RETENTION_DAYS] = days
     if "daily_output_fallback" in raw:
-        settings[CONF_OUTPUT_FALLBACK] = bool(raw["daily_output_fallback"])
+        # A YAML true or false only: bool("false") would be True.
+        if not isinstance(value := raw["daily_output_fallback"], bool):
+            raise ConfigImportError("import_bad_value", f"daily_output_fallback: {value!r}")
+        settings[CONF_OUTPUT_FALLBACK] = value
     return settings
 
 

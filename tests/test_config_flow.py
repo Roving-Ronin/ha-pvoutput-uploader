@@ -773,3 +773,52 @@ async def test_import_config_errors(recorder_mock, hass: HomeAssistant, sensors)
     )
     assert result["errors"] == {"base": "import_unit_mismatch"}
     assert entry.options[CONF_FIELDS] == []
+
+
+async def test_import_merge_checks_only_fields_it_takes(
+    recorder_mock, hass: HomeAssistant, sensors
+) -> None:
+    # v2 is configured here; the import's v2 has a temperature sensor (wrong
+    # unit), but merging keeps the v2 configured here, so it is not checked.
+    entry = options_entry(hass, fields=[_mapping("v2", "sensor.power")])
+    text = (
+        "pvoutput_uploader: 1\nfields:\n  - field: v2\n    sensor: sensor.outside\n"
+        "  - field: v5\n    sensor: sensor.outside\n"
+    )
+    result = await _import(hass, entry, {"config": text})
+    assert result["type"] is FlowResultType.CREATE_ENTRY
+    by_field = {m["field"]: m for m in entry.options[CONF_FIELDS]}
+    assert by_field["v2"]["entity_id"] == "sensor.power"
+    assert by_field["v5"]["entity_id"] == "sensor.outside"
+
+    # Replacing does take it, so there it is refused.
+    result = await _import(hass, entry, {"config": text, "import_mode": "replace"})
+    assert result["errors"] == {"base": "import_unit_mismatch"}
+    assert result["description_placeholders"]["detail"] == "v2"
+
+
+async def test_import_donor_fields_on_a_standard_account(
+    recorder_mock, hass: HomeAssistant, sensors
+) -> None:
+    entry = options_entry(hass, donor=False)
+    text = (
+        "pvoutput_uploader: 1\nfields:\n  - field: v2\n    sensor: sensor.power\n"
+        "  - field: b1\n    sensor: sensor.power\n"
+    )
+    result = await _import(hass, entry, {"config": text})
+    # Said before saving: b1 is kept but not sent until the account is a donor.
+    assert result["step_id"] == "import_donor"
+    assert result["description_placeholders"]["fields"] == "b1"
+    assert entry.options[CONF_FIELDS] == []
+    result = await _configure(hass, result, {})
+    assert result["type"] is FlowResultType.CREATE_ENTRY
+    assert [m["field"] for m in entry.options[CONF_FIELDS]] == ["v2", "b1"]
+
+
+async def test_import_donor_fields_on_a_donor_account(
+    recorder_mock, hass: HomeAssistant, sensors
+) -> None:
+    entry = options_entry(hass, donor=True)
+    text = "pvoutput_uploader: 1\nfields:\n  - field: b1\n    sensor: sensor.power\n"
+    result = await _import(hass, entry, {"config": text})
+    assert result["type"] is FlowResultType.CREATE_ENTRY

@@ -197,6 +197,7 @@ class PVOutputUploaderOptionsFlow(OptionsFlow):
         self._import_input: dict[str, Any] = {}
         self._import: ParsedConfig | None = None
         self._import_missing: list[str] = []
+        self._import_donor_only: list[str] = []
 
     @property
     def _fields(self) -> list[dict[str, Any]]:
@@ -1066,23 +1067,48 @@ class PVOutputUploaderOptionsFlow(OptionsFlow):
                 else:
                     continue  # No sensor here: the field is left out.
             fields.append(mapping)
+        self._options = deepcopy(DEFAULT_OPTIONS) | deepcopy(dict(self.config_entry.options))
+        try:
+            merged = merge_fields(self._fields, fields, replace)
+        except ConfigImportError as err:
+            return self._import_form({"base": err.key}, err.detail)
+        # Only the imported fields that are kept are checked: when merging, a field
+        # configured here wins and the imported one is not used.
+        taken = [m for m in merged if any(m is f for f in fields)]
         if wrong := [
             m[MAP_FIELD]
-            for m in fields
+            for m in taken
             if m.get(MAP_ENTITY)
             and self._unit_error(
                 m[MAP_FIELD], m[MAP_ENTITY], m[MAP_AGGREGATE], m.get(MAP_UNIT)
             )
         ]:
             return self._import_form({"base": "import_unit_mismatch"}, ", ".join(wrong))
-        self._options = deepcopy(DEFAULT_OPTIONS) | deepcopy(dict(self.config_entry.options))
-        try:
-            self._options[CONF_FIELDS] = merge_fields(self._fields, fields, replace)
-        except ConfigImportError as err:
-            return self._import_form({"base": err.key}, err.detail)
+        self._options[CONF_FIELDS] = merged
         if self._import_input[CONF_IMPORT_SETTINGS]:
             self._options.update(self._import.settings)
+        # Donor-only fields can be imported on a standard account (as when an account
+        # stops being a donor): configured, but not sent or downloaded until it is
+        # one. Said before saving, so it is a decision, not a surprise.
+        if not self._donor() and (
+            self._import_donor_only := [
+                m[MAP_FIELD] for m in taken if FIELDS_BY_KEY[m[MAP_FIELD]].donor
+            ]
+        ):
+            return await self.async_step_import_donor()
         return self._save()
+
+    async def async_step_import_donor(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Confirm donor-only fields on a standard account."""
+        if user_input is not None:
+            return self._save()
+        return self.async_show_form(
+            step_id="import_donor",
+            data_schema=vol.Schema({}),
+            description_placeholders={"fields": ", ".join(self._import_donor_only)},
+        )
 
     # PVOutput history
 

@@ -481,8 +481,13 @@ installation:
 - **Sensors with other names**: every sensor the YAML names that this installation does
   not have is listed on one screen, to pick the sensor here that gives the same value.
   A field left without one is skipped (a Download field is kept, without a sensor).
-- Everything is checked before anything is saved: known fields, battery fields only
-  with b1, units against the sensors.
+- Everything is checked before anything is saved: known fields, valid values (`true`
+  or `false` for switches, real numbers for fixed values), battery fields only with b1,
+  and units against the sensors. When merging, only the fields actually added are
+  checked: a field configured here wins over the imported one.
+- **Donor-only fields on a standard account** (v7-v12, b1-b6) can be imported, after
+  a confirmation: they are configured but not sent or downloaded until the account is a
+  donor, as when an account stops being one.
 
 **Shared setups.** Ready-made mappings for inverter and battery integrations are in
 [`setups/`](setups/) (submitted by pull request, checked by the tests) and on the
