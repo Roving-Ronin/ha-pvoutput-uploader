@@ -1090,12 +1090,12 @@ class PVOutputUploaderOptionsFlow(OptionsFlow):
         # Donor-only fields can be imported on a standard account (as when an account
         # stops being a donor): configured, but not sent or downloaded until it is
         # one. Said before saving, so it is a decision, not a surprise.
-        if not self._donor() and (
-            self._import_donor_only := [
+        if not self._donor():
+            self._import_donor_only = [
                 m[MAP_FIELD] for m in taken if FIELDS_BY_KEY[m[MAP_FIELD]].donor
             ]
-        ):
-            return await self.async_step_import_donor()
+            if self._import_donor_only:
+                return await self.async_step_import_donor()
         return self._save()
 
     async def async_step_import_donor(
