@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.1.9
+
+Stable release of the 0.1.9 betas (b1-b3): an energy fix, and export and import of the configuration.
+
+- **Fix: energy could be lost while recording** ([#3](https://github.com/darek-margas/ha-pvoutput-uploader/issues/3)). The log is filled from the recorder in small reads, and an increment across a read boundary was counted by neither read when the energy counter was unavailable there, or when a state reached the recorder after the previous read. Each counter's last value is now carried from one read to the next, saved together with the read position and kept across restarts. Import history carries it across its day boundaries too.
+- **Repairing days already short:** **Configure → Import history from Home Assistant** for those days, with *Replace recorded values* and *Send to PVOutput* on, rebuilds them from the recorder (within its keep days) and sends them again.
+- **Export and import configuration** ([#4](https://github.com/darek-margas/ha-pvoutput-uploader/issues/4)): **Configure → Export configuration** shows the site's fields and settings as YAML (also the `pvoutput_uploader.export_config` action), never with the API key or system ID. **Configure → Import configuration** adds the missing fields or replaces all, takes settings only when asked, lets you pick your own sensor for any it names that are not here, and checks everything before saving. Donor-only fields on a standard account are imported only after a confirmation.
+- **Shared setups:** ready-made mappings for inverter and battery integrations in `setups/` (by pull request, checked by the tests) and on the wiki's Shared setups page.
+- **Connection errors name the error:** a timeout now logs e.g. `addstatus.jsp: TimeoutError` instead of nothing.
+
+**Upgrading from 0.1.8:** nothing to do. Days that came out short before can be repaired as above.
+
+Details per beta below.
+
 ## 0.1.9b3
 
 Fixes from the review of 0.1.9b2:
