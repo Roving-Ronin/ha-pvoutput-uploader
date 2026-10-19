@@ -39,6 +39,7 @@
   },
   "services": {
     "reupload": { "service": "mdi:cloud-upload-outline" },
-    "import_from_recorder": { "service": "mdi:database-import" }
+    "import_from_recorder": { "service": "mdi:database-import" },
+    "export_config": { "service": "mdi:file-export-outline" }
   }
 }

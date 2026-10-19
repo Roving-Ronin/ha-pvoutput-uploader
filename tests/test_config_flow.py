@@ -149,7 +149,7 @@ async def _add(hass: HomeAssistant, entry: MockConfigEntry, kind: str) -> FlowRe
 async def test_menu(recorder_mock, hass: HomeAssistant) -> None:
     entry = options_entry(hass)
     result = await _menu(hass, entry)
-    assert result["menu_options"] == ["add_field", "reupload", "import_history", "download_history", "settings"]
+    assert result["menu_options"] == ["add_field", "reupload", "import_history", "download_history", "export_config", "import_config", "settings"]
     assert "No fields yet" in result["description_placeholders"]["fields"]
 
 
@@ -176,7 +176,7 @@ async def test_add_sensor_field(recorder_mock, hass: HomeAssistant, sensors) -> 
     result = await _menu(hass, entry)
     assert result["menu_options"] == [
         "add_field", "edit_field", "fields", "remove_field", "reupload",
-        "import_history", "download_history", "settings",
+        "import_history", "download_history", "export_config", "import_config", "settings",
     ]
     assert "Outside" in result["description_placeholders"]["fields"]
     result = await _add(hass, entry, "add_sensor")
@@ -676,3 +676,100 @@ async def test_fields_refuse_a_stale_download_choice(
     assert result["errors"] == {"v7": "mode_not_allowed"}
     assert select_options(result, "v7") == ["send", "record_only"]
     assert _modes(entry) == {"v7": "send"}
+
+
+async def test_export_config(recorder_mock, hass: HomeAssistant) -> None:
+    entry = options_entry(hass, fields=[_mapping("v2", "sensor.power")])
+    result = await _choose(hass, await _menu(hass, entry), "export_config")
+    assert result["step_id"] == "export_config"
+    text = result["data_schema"].schema
+    shown = next(
+        marker.description["suggested_value"] for marker in text if marker == "config"
+    )
+    assert shown.startswith("pvoutput_uploader: 1\n")
+    assert "sensor.power" in shown
+    assert "key" not in shown and "1234" not in shown
+    # Submitting changes nothing.
+    before = dict(entry.options)
+    result = await _configure(hass, result, {"config": shown})
+    assert result["type"] is FlowResultType.ABORT
+    assert result["reason"] == "export_closed"
+    assert dict(entry.options) == before
+
+
+SHARED = """\
+pvoutput_uploader: 1
+fields:
+  - field: v2
+    sensor: sensor.power
+    name: PV power
+  - field: v5
+    sensor: sensor.sigen_outside
+    mode: record_only
+  - field: v4
+    sensor: sensor.sigen_load
+settings:
+  upload_interval: 10
+"""
+
+
+async def _import(hass: HomeAssistant, entry: MockConfigEntry, data: dict[str, Any]) -> FlowResult:
+    result = await _choose(hass, await _menu(hass, entry), "import_config")
+    assert result["step_id"] == "import_config"
+    return await _configure(
+        hass, result, {"import_mode": "merge", "import_settings": False} | data
+    )
+
+
+async def test_import_config_maps_missing_sensors(
+    recorder_mock, hass: HomeAssistant, sensors
+) -> None:
+    entry = options_entry(hass, fields=[_mapping("v6", "sensor.voltage")])
+    result = await _import(hass, entry, {"config": SHARED})
+    # sensor.power exists here; the two Sigenergy sensors do not.
+    assert result["step_id"] == "import_map"
+    assert set(result["data_schema"].schema) == {"sensor.sigen_outside", "sensor.sigen_load"}
+    result = await _configure(hass, result, {"sensor.sigen_outside": "sensor.outside"})
+    assert result["type"] is FlowResultType.CREATE_ENTRY
+    by_field = {m["field"]: m for m in entry.options[CONF_FIELDS]}
+    # Merged: v6 stays; v4 had no sensor picked, so it is left out.
+    assert set(by_field) == {"v6", "v2", "v5"}
+    assert by_field["v2"]["name"] == "PV power"
+    assert by_field["v5"]["entity_id"] == "sensor.outside"
+    assert by_field["v5"]["active"] is False
+    # Settings are taken only when asked.
+    assert entry.options["upload_interval"] == "auto"
+
+
+async def test_import_config_replace_with_settings(
+    recorder_mock, hass: HomeAssistant, sensors
+) -> None:
+    entry = options_entry(hass, fields=[_mapping("v6", "sensor.voltage")])
+    text = "pvoutput_uploader: 1\nfields:\n  - field: v2\n    sensor: sensor.power\n" \
+        "settings:\n  upload_interval: 10\n  keep_history_days: 200\n"
+    result = await _import(
+        hass, entry, {"config": text, "import_mode": "replace", "import_settings": True}
+    )
+    assert result["type"] is FlowResultType.CREATE_ENTRY
+    assert [m["field"] for m in entry.options[CONF_FIELDS]] == ["v2"]
+    assert entry.options["upload_interval"] == "10"
+    assert entry.options["retention_days"] == 200
+
+
+async def test_import_config_errors(recorder_mock, hass: HomeAssistant, sensors) -> None:
+    entry = options_entry(hass)
+    result = await _import(hass, entry, {"config": "not: a config"})
+    assert result["errors"] == {"base": "import_not_a_config"}
+
+    result = await _import(
+        hass, entry, {"config": "pvoutput_uploader: 1\nfields:\n  - field: v99\n    sensor: sensor.x"}
+    )
+    assert result["errors"] == {"base": "import_unknown_field"}
+    assert result["description_placeholders"]["detail"] == "v99"
+
+    # A temperature sensor for a power field.
+    result = await _import(
+        hass, entry, {"config": "pvoutput_uploader: 1\nfields:\n  - field: v2\n    sensor: sensor.outside"}
+    )
+    assert result["errors"] == {"base": "import_unit_mismatch"}
+    assert entry.options[CONF_FIELDS] == []

@@ -18,6 +18,7 @@ from homeassistant.exceptions import ServiceValidationError
 from homeassistant.helpers import config_validation as cv
 from homeassistant.util import dt as dt_util
 
+from .config_io import export_config, to_yaml
 from .const import DOMAIN
 from .coordinator import PVOutputConfigEntry
 from .uploader import REUPLOAD_AUTO, REUPLOAD_OUTPUTS, REUPLOAD_STATUSES
@@ -34,6 +35,7 @@ ATTR_PASSIVE_FIELDS = "passive_fields"
 
 SERVICE_REUPLOAD = "reupload"
 SERVICE_IMPORT = "import_from_recorder"
+SERVICE_EXPORT = "export_config"
 
 REUPLOAD_SCHEMA = vol.Schema(
     {
@@ -48,6 +50,7 @@ REUPLOAD_SCHEMA = vol.Schema(
         ),
     }
 )
+EXPORT_SCHEMA = vol.Schema({vol.Optional(ATTR_CONFIG_ENTRY_ID): cv.string})
 IMPORT_SCHEMA = vol.Schema(
     {
         vol.Optional(ATTR_CONFIG_ENTRY_ID): cv.string,
@@ -141,6 +144,11 @@ def async_setup_services(hass: HomeAssistant) -> None:
         await coordinator.async_request_refresh()
         return result
 
+    async def export_config_service(call: ServiceCall) -> ServiceResponse:
+        """Return the site's fields and settings (no API key or system ID)."""
+        config = export_config(dict(_entry(hass, call).options))
+        return {"yaml": to_yaml(config), "config": config}
+
     hass.services.async_register(
         DOMAIN,
         SERVICE_REUPLOAD,
@@ -154,4 +162,11 @@ def async_setup_services(hass: HomeAssistant) -> None:
         import_from_recorder,
         schema=IMPORT_SCHEMA,
         supports_response=SupportsResponse.OPTIONAL,
+    )
+    hass.services.async_register(
+        DOMAIN,
+        SERVICE_EXPORT,
+        export_config_service,
+        schema=EXPORT_SCHEMA,
+        supports_response=SupportsResponse.ONLY,
     )

@@ -95,3 +95,10 @@ import_from_recorder:
             - b4
             - b5
             - b6
+
+export_config:
+  fields:
+    config_entry_id:
+      selector:
+        config_entry:
+          integration: pvoutput_uploader

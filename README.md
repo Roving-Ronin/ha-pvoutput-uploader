@@ -168,6 +168,9 @@ Each action saves as soon as it is submitted.
   period.
 - **Download history from PVOutput**: read PVOutput's history for a period into
   statistics (see **PVOutput history** below).
+- **Export configuration** / **Import configuration**: the site's fields and settings as
+  YAML, to move them to another installation or share them as a ready-made setup (see
+  **Export, import and shared setups** below).
 - **Settings**: account type, upload interval, history retention, daily output fallback.
 
 ### Fields
@@ -443,6 +446,48 @@ that period are sent again to add them. In the action: `passive_fields: [v5]`.
 with 4,657 still waiting to upload. The diagnostics show progress as the backlog is sent.
 
 <img src="docs/images/pvoutput-history-upload.png" alt="PVOutput history upload diagnostics showing 4,935 stored samples, history starting three weeks ago, and 4,657 samples waiting to upload" width="325">
+
+## Export, import and shared setups
+
+**Configure → Export configuration** shows the site's fields and settings as YAML, to
+copy (also as the `pvoutput_uploader.export_config` action, which returns it). The API
+key and system ID are never part of it, so it can be shared as it is:
+
+```yaml
+pvoutput_uploader: 1
+fields:
+  - field: v2
+    sensor: sensor.inverter_pv_power
+    name: Power Generation
+    mode: send                     # send, record_only or download
+    value_per_interval: average    # average, last or energy_today
+  - field: b3
+    constant: 10000
+    name: Battery Size
+settings:
+  account_type: auto
+  upload_interval: auto
+  keep_history_days: 91
+  daily_output_fallback: false
+```
+
+**Configure → Import configuration** takes such a YAML in, on another site or
+installation:
+
+- **Fields**: *add the fields not configured yet* (what is configured here stays), or
+  *replace all fields*.
+- **Settings** are taken only when *Also take its settings* is ticked; otherwise the
+  site keeps its own.
+- **Sensors with other names**: every sensor the YAML names that this installation does
+  not have is listed on one screen, to pick the sensor here that gives the same value.
+  A field left without one is skipped (a Download field is kept, without a sensor).
+- Everything is checked before anything is saved: known fields, battery fields only
+  with b1, units against the sensors.
+
+**Shared setups.** Ready-made mappings for inverter and battery integrations are in
+[`setups/`](setups/) (submitted by pull request, checked by the tests) and on the
+[wiki](https://github.com/darek-margas/ha-pvoutput-uploader/wiki/Shared-setups). To
+share yours, export it and add it to either.
 
 ## How it works
 

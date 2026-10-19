@@ -688,3 +688,27 @@ async def test_download_history_from_the_menu(
         assert result["errors"] == {"base": "end_before_start"}
 
     assert await hass.config_entries.async_unload(entry.entry_id)
+
+
+async def test_export_config_action(
+    recorder_mock, hass: HomeAssistant, entry: MockConfigEntry
+) -> None:
+    fields = [
+        {
+            "field": "v5", "entity_id": "sensor.outside", "constant": None,
+            "name": "Ambient", "active": True, "aggregate": "average",
+        },
+    ]
+    hass.config_entries.async_update_entry(
+        entry, options=dict(entry.options) | {"fields": fields}
+    )
+    with patch(GET_SYSTEM, AsyncMock(return_value=SystemInfo("My System", 5, False))):
+        await _setup(hass, entry)
+        response = await hass.services.async_call(
+            DOMAIN, "export_config", {}, blocking=True, return_response=True
+        )
+    assert response["config"]["fields"][0]["sensor"] == "sensor.outside"
+    assert response["yaml"].startswith("pvoutput_uploader: 1\n")
+    # No API key or system ID.
+    assert "key" not in response["yaml"] and "1234" not in response["yaml"]
+    assert await hass.config_entries.async_unload(entry.entry_id)

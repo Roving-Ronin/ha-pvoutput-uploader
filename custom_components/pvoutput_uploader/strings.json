@@ -38,6 +38,8 @@
           "reupload": "Reupload history",
           "import_history": "Import history from Home Assistant",
           "download_history": "Download history from PVOutput",
+          "export_config": "Export configuration",
+          "import_config": "Import configuration",
           "settings": "Settings"
         }
       },
@@ -227,6 +229,33 @@
           "end": "Up to yesterday; today is not complete yet."
         }
       },
+      "export_config": {
+        "title": "Export configuration",
+        "description": "This site's {count} fields and its settings, to copy into a file or a post. The API key and system ID are not part of it, so it can be shared as it is, e.g. as a ready-made setup for your inverter or battery integration (see the wiki's Shared setups). Use **Import configuration** on another site or installation to take it in.",
+        "data": {
+          "config": "Configuration (YAML)"
+        },
+        "data_description": {
+          "config": "Select all and copy. Submitting closes this without changing anything."
+        }
+      },
+      "import_config": {
+        "title": "Import configuration",
+        "description": "Paste a configuration from **Export configuration**, e.g. from another installation or a shared setup. It never contains an API key or system ID; this site keeps its own. Sensors this installation does not have can be picked on the next screen.",
+        "data": {
+          "config": "Configuration (YAML)",
+          "import_mode": "Fields",
+          "import_settings": "Also take its settings"
+        },
+        "data_description": {
+          "import_mode": "Add only the fields not configured here yet, or replace all fields of this site.",
+          "import_settings": "Account type, upload interval, history retention and daily output fallback. Off: this site keeps its own."
+        }
+      },
+      "import_map": {
+        "title": "Sensors to pick",
+        "description": "The configuration uses sensors this installation does not have:\n{missing}\n\nPick the sensor here that gives the same value. Left empty, the field is left out (a Download field is kept, without a sensor)."
+      },
       "download_history_partial": {
         "title": "Not all of it has detail",
         "description": "PVOutput has no statuses for **{start}** to the day before **{first}** ({missing} days), so they cannot be downloaded: those hours stay empty, or keep what was downloaded before. Submit to download **{first}** to **{end}**."
@@ -258,6 +287,16 @@
       "start_required": "Enter the date and time to start from.",
       "unit_required": "This sensor has no unit. Enter its source unit before saving.",
       "entity_or_constant": "Pick either a sensor or a fixed value (one of them).",
+      "import_not_yaml": "This is not valid YAML: {detail}",
+      "import_not_a_config": "This is not a PVOutput Uploader configuration: it should start with `pvoutput_uploader: 1`, as Export configuration writes it.",
+      "import_newer_format": "This configuration comes from a newer version of the integration (format {detail}). Update the integration first.",
+      "import_bad_field": "A field entry is not valid: {detail}",
+      "import_unknown_field": "Unknown PVOutput field: {detail}",
+      "import_bad_value": "Not valid: {detail}",
+      "import_duplicate_field": "A field appears more than once: {detail}",
+      "import_b1_required": "Battery fields {detail} need b1 (battery power), which the result would not have.",
+      "import_unit_mismatch": "The sensor's unit does not fit the field, or a sensor without a unit has no unit given: {detail}. Pick other sensors, or add a unit to those fields.",
+      "import_empty": "There are no fields to import (and its settings are not taken).",
       "mode_not_allowed": "Not available for this field any more (e.g. the account is no longer a donor, which v7-v12 need to download). The page now shows what is."
     },
     "abort": {
@@ -267,10 +306,17 @@
       "reupload_queued": "Queued: {status_days} days as statuses, {output_days} days as daily totals. Progress shows in the Samples waiting and Daily outputs waiting sensors.",
       "import_done": "Imported {from_states} samples from recorded states and {from_statistics} from statistics.",
       "history_download_queued": "Downloading {days} days of PVOutput history ({start} to {end}) in the background. Progress shows in the History download days left sensor.",
-      "no_history_detail": "PVOutput has no statuses between {start} and {end}, so there is nothing to download."
+      "no_history_detail": "PVOutput has no statuses between {start} and {end}, so there is nothing to download.",
+      "export_closed": "Closed; nothing was changed."
     }
   },
   "selector": {
+    "import_mode": {
+      "options": {
+        "merge": "Add the fields not configured yet",
+        "replace": "Replace all fields"
+      }
+    },
     "field_mode": {
       "options": {
         "send": "Send",
@@ -436,6 +482,16 @@
         "method": {
           "name": "Method",
           "description": "How the days are sent."
+        }
+      }
+    },
+    "export_config": {
+      "name": "Export configuration",
+      "description": "Returns a site's fields and settings as YAML (and as data), without the API key or system ID. The same as Configure → Export configuration.",
+      "fields": {
+        "config_entry_id": {
+          "name": "PVOutput system",
+          "description": "Needed only when more than one system is set up."
         }
       }
     },

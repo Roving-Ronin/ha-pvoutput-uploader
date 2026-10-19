@@ -1,0 +1,45 @@
+# Example setup: a hybrid inverter with a battery.
+#
+# Integration: <name and link>, version <x.y>
+# Hardware:    <inverter / battery model>
+# Notes:       Replace the entity IDs with your integration's defaults.
+#              v7 (grid frequency) and b1-b6 need a PVOutput donor account.
+pvoutput_uploader: 1
+fields:
+  - field: v1
+    sensor: sensor.inverter_pv_energy_today
+    name: Energy Generation
+    value_per_interval: energy_today
+  - field: v2
+    sensor: sensor.inverter_pv_power
+    name: Power Generation
+    value_per_interval: average
+  - field: v3
+    sensor: sensor.inverter_load_energy_today
+    name: Energy Consumption
+    value_per_interval: energy_today
+  - field: v4
+    sensor: sensor.inverter_load_power
+    name: Power Consumption
+    value_per_interval: average
+  - field: v5
+    sensor: sensor.inverter_temperature
+    name: Inverter temperature
+    mode: record_only
+  - field: v6
+    sensor: sensor.inverter_grid_voltage
+    name: Voltage
+  - field: v7
+    sensor: sensor.inverter_grid_frequency
+    name: Grid frequency
+    unit: Hz
+  - field: b1
+    sensor: sensor.battery_power
+    name: Battery Power
+  - field: b2
+    sensor: sensor.battery_state_of_charge
+    name: Battery State of Charge
+    value_per_interval: last
+  - field: b3
+    constant: 10000
+    name: Battery Size

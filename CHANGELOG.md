@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.1.9b2
+
+- **Export and import configuration** ([#4](https://github.com/darek-margas/ha-pvoutput-uploader/issues/4)): **Configure → Export configuration** shows the site's fields and settings as YAML to copy (also the `pvoutput_uploader.export_config` action), never with the API key or system ID. **Configure → Import configuration** takes it in: add the missing fields or replace all, settings only when asked, and sensors this installation names differently picked on one screen. Everything is checked before it is saved.
+- **Shared setups:** ready-made mappings for inverter and battery integrations in `setups/` (pull requests, checked by the tests) and on the wiki.
+
 ## 0.1.9b1
 
 - **Fix: energy could be lost while recording** ([#3](https://github.com/darek-margas/ha-pvoutput-uploader/issues/3)). The log is filled from the recorder in small reads, usually one 5 minute slot a minute, and each read counted energy from the counter value in force at its start. When the counter was unavailable at a read boundary, or a state reached the recorder after the previous read, the increment across the boundary was counted by neither read, so the log, and PVOutput, fell behind the sensor. Each counter's last value is now carried from one read to the next and kept across restarts, so the increment lands in the next slot. Import history carries it across its day boundaries too.

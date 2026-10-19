@@ -32,6 +32,7 @@ from homeassistant.helpers.selector import (
     SelectSelectorConfig,
     SelectSelectorMode,
     TextSelector,
+    TextSelectorConfig,
 )
 from homeassistant.util import dt as dt_util
 
@@ -79,6 +80,14 @@ from .const import (
     upload_unit,
     UPLOAD_INTERVALS,
 )
+from .config_io import (
+    ConfigImportError,
+    ParsedConfig,
+    export_config,
+    merge_fields,
+    parse_config,
+    to_yaml,
+)
 from .services import (
     ATTR_END,
     ATTR_METHOD,
@@ -90,6 +99,11 @@ from .services import (
 )
 from .uploader import REUPLOAD_AUTO, REUPLOAD_OUTPUTS, REUPLOAD_STATUSES, Uploader
 
+CONF_CONFIG = "config"
+CONF_IMPORT_MODE = "import_mode"
+CONF_IMPORT_SETTINGS = "import_settings"
+IMPORT_MERGE = "merge"
+IMPORT_REPLACE = "replace"
 ATTR_FROM = "from"
 FROM_FAILURE = "since_failure"
 FROM_TIME = "from_time"
@@ -178,6 +192,11 @@ class PVOutputUploaderOptionsFlow(OptionsFlow):
         # A history download whose start PVOutput has no detail for:
         # (start asked, first day with detail, end).
         self._history: tuple[date, date, date] | None = None
+        # An import being applied: the form's input, the parsed configuration,
+        # and the sensors it names that this installation does not have.
+        self._import_input: dict[str, Any] = {}
+        self._import: ParsedConfig | None = None
+        self._import_missing: list[str] = []
 
     @property
     def _fields(self) -> list[dict[str, Any]]:
@@ -316,7 +335,14 @@ class PVOutputUploaderOptionsFlow(OptionsFlow):
             fields += "\n\n" + self._all_in_use()
         if self._fields:
             menu += ["edit_field", "fields", "remove_field"]
-        menu += ["reupload", "import_history", "download_history", "settings"]
+        menu += [
+            "reupload",
+            "import_history",
+            "download_history",
+            "export_config",
+            "import_config",
+            "settings",
+        ]
         detected = self.config_entry.data.get(CONF_DETECTED_INTERVAL, DEFAULT_INTERVAL_MINUTES)
         return self.async_show_menu(
             step_id="init",
@@ -942,6 +968,121 @@ class PVOutputUploaderOptionsFlow(OptionsFlow):
         )
 
     # Settings
+
+    # Export and import of fields and settings
+
+    async def async_step_export_config(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Show the fields and settings as YAML, to copy (no API key or system ID)."""
+        if user_input is not None:
+            return self.async_abort(reason="export_closed")
+        text = to_yaml(export_config(self._options))
+        schema = vol.Schema(
+            {vol.Optional(CONF_CONFIG): TextSelector(TextSelectorConfig(multiline=True))}
+        )
+        return self.async_show_form(
+            step_id="export_config",
+            data_schema=self.add_suggested_values_to_schema(schema, {CONF_CONFIG: text}),
+            description_placeholders={"count": str(len(self._fields))},
+        )
+
+    def _import_form(
+        self, errors: dict[str, str] | None = None, detail: str = ""
+    ) -> ConfigFlowResult:
+        schema = vol.Schema(
+            {
+                vol.Required(CONF_CONFIG): TextSelector(TextSelectorConfig(multiline=True)),
+                vol.Required(CONF_IMPORT_MODE, default=IMPORT_MERGE): SelectSelector(
+                    SelectSelectorConfig(
+                        options=[IMPORT_MERGE, IMPORT_REPLACE],
+                        translation_key="import_mode",
+                        mode=SelectSelectorMode.LIST,
+                    )
+                ),
+                vol.Required(CONF_IMPORT_SETTINGS, default=False): BooleanSelector(),
+            }
+        )
+        return self.async_show_form(
+            step_id="import_config",
+            data_schema=self.add_suggested_values_to_schema(schema, self._import_input),
+            description_placeholders={"detail": detail},
+            errors=errors or {},
+        )
+
+    async def async_step_import_config(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Paste an exported configuration (e.g. a shared setup) to use it here."""
+        if user_input is None:
+            return self._import_form()
+        self._import_input = dict(user_input)
+        try:
+            parsed = parse_config(user_input[CONF_CONFIG])
+        except ConfigImportError as err:
+            return self._import_form({"base": err.key}, err.detail)
+        if not parsed.fields and not (user_input[CONF_IMPORT_SETTINGS] and parsed.settings):
+            return self._import_form({"base": "import_empty"})
+        self._import = parsed
+        self._import_missing = [
+            entity for entity in parsed.entities if self.hass.states.get(entity) is None
+        ]
+        if self._import_missing:
+            return await self.async_step_import_map()
+        return await self._apply_import({})
+
+    async def async_step_import_map(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Pick this installation's sensor for each one the import names but is not here."""
+        if user_input is not None:
+            return await self._apply_import(
+                {entity: user_input.get(entity) for entity in self._import_missing}
+            )
+        return self.async_show_form(
+            step_id="import_map",
+            data_schema=vol.Schema(
+                {vol.Optional(entity): ENTITY_SELECTOR for entity in self._import_missing}
+            ),
+            description_placeholders={
+                "missing": "\n".join(f"- `{entity}`" for entity in self._import_missing)
+            },
+        )
+
+    async def _apply_import(self, remap: dict[str, str | None]) -> ConfigFlowResult:
+        """Save the imported fields (and settings, if asked) to the options as saved now."""
+        assert self._import is not None
+        replace = self._import_input[CONF_IMPORT_MODE] == IMPORT_REPLACE
+        fields: list[dict[str, Any]] = []
+        for mapping in self._import.fields:
+            mapping = dict(mapping)
+            entity = mapping.get(MAP_ENTITY)
+            if entity in remap:
+                if remap[entity]:
+                    mapping[MAP_ENTITY] = remap[entity]
+                elif mapping.get(MAP_DIRECTION) == DIRECTION_DOWNLOAD:
+                    # Downloading needs no sensor: keep it, without one.
+                    mapping[MAP_ENTITY] = None
+                else:
+                    continue  # No sensor here: the field is left out.
+            fields.append(mapping)
+        if wrong := [
+            m[MAP_FIELD]
+            for m in fields
+            if m.get(MAP_ENTITY)
+            and self._unit_error(
+                m[MAP_FIELD], m[MAP_ENTITY], m[MAP_AGGREGATE], m.get(MAP_UNIT)
+            )
+        ]:
+            return self._import_form({"base": "import_unit_mismatch"}, ", ".join(wrong))
+        self._options = deepcopy(DEFAULT_OPTIONS) | deepcopy(dict(self.config_entry.options))
+        try:
+            self._options[CONF_FIELDS] = merge_fields(self._fields, fields, replace)
+        except ConfigImportError as err:
+            return self._import_form({"base": err.key}, err.detail)
+        if self._import_input[CONF_IMPORT_SETTINGS]:
+            self._options.update(self._import.settings)
+        return self._save()
 
     # PVOutput history
 
