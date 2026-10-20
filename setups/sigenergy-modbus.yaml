@@ -63,4 +63,3 @@ settings:
   account_type: auto
   upload_interval: auto
   keep_history_days: 91
-  daily_output_fallback: true
