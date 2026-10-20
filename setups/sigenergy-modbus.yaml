@@ -1,5 +1,5 @@
 #
-# COMMENT: This is for a Sigenergy Sigenstore, using the 'TypQxQ Local Modbus' integration, available at: https://github.com/TypQxQ/Sigenergy-Local-Modbus
+# COMMENT: This is for a Sigenergy Sigenstor, using the 'TypQxQ Local Modbus' integration, available at: https://github.com/TypQxQ/Sigenergy-Local-Modbus
 #
 pvoutput_uploader: 1
 fields:
@@ -37,16 +37,6 @@ fields:
   name: Grid Export
   mode: send
   value_per_interval: last
-- field: v11
-  sensor: sensor.nodered_sellprice
-  name: Export Tariff
-  mode: send
-  value_per_interval: last
-- field: v12
-  sensor: sensor.nodered_buyprice
-  name: Import Tariff
-  mode: send
-  value_per_interval: last
 - field: b1
   sensor: sensor.sigen_plant_battery_power
   name: Battery
@@ -70,7 +60,7 @@ fields:
   value_per_interval: last
   unit: kWh
 settings:
-  account_type: donor
+  account_type: auto
   upload_interval: auto
   keep_history_days: 91
   daily_output_fallback: true
