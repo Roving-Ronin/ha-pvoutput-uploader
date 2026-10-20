@@ -1,0 +1,76 @@
+#
+# COMMENT: This is for a Sigenergy Sigenstore, using the 'TypQxQ Local Modbus' integration, available at: https://github.com/TypQxQ/Sigenergy-Local-Modbus
+#
+pvoutput_uploader: 1
+fields:
+- field: v1
+  sensor: sensor.sigen_plant_total_pv_generation
+  name: Energy
+  mode: send
+  value_per_interval: energy_today
+  unit: kWh
+- field: v2
+  sensor: sensor.sigen_plant_pv_power
+  name: Power
+  mode: send
+  value_per_interval: average
+  unit: kW
+- field: v3
+  sensor: sensor.sigen_plant_total_load_consumption
+  name: Energy Used
+  mode: send
+  value_per_interval: energy_today
+  unit: kWh
+- field: v4
+  sensor: sensor.sigen_plant_consumed_power
+  name: Power Consumption
+  mode: send
+  value_per_interval: average
+  unit: kW
+- field: v8
+  sensor: sensor.sigen_plant_daily_grid_import_energy
+  name: Grid Import
+  mode: send
+  value_per_interval: last
+- field: v9
+  sensor: sensor.sigen_plant_daily_grid_export_energy
+  name: Grid Export
+  mode: send
+  value_per_interval: last
+- field: v11
+  sensor: sensor.nodered_sellprice
+  name: Export Tariff
+  mode: send
+  value_per_interval: last
+- field: v12
+  sensor: sensor.nodered_buyprice
+  name: Import Tariff
+  mode: send
+  value_per_interval: last
+- field: b1
+  sensor: sensor.sigen_plant_battery_power
+  name: Battery
+  mode: send
+  value_per_interval: average
+- field: b2
+  sensor: sensor.sigen_plant_battery_state_of_charge
+  name: SoC
+  mode: send
+  value_per_interval: average
+- field: b4
+  sensor: sensor.sigen_plant_total_charged_energy_of_the_ess
+  name: Battery Lifetime Charge
+  mode: send
+  value_per_interval: last
+  unit: kWh
+- field: b5
+  sensor: sensor.sigen_plant_total_discharged_energy_of_the_ess
+  name: Battery Lifetime Discharge
+  mode: send
+  value_per_interval: last
+  unit: kWh
+settings:
+  account_type: donor
+  upload_interval: auto
+  keep_history_days: 91
+  daily_output_fallback: true
