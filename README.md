@@ -329,7 +329,9 @@ kW of system size) present while any field downloads.
 ## PVOutput history
 
 PVOutput keeps every status it was sent, for a long time (more than a year on a donor
-account in our tests). The integration keeps that history as **hourly Home Assistant
+account in our tests). That makes it an **offsite backup** of your energy history: after
+moving to a new Home Assistant installation, or losing its database, **Download history
+from PVOutput** brings the past back into statistics and the Energy dashboard. The integration keeps that history as **hourly Home Assistant
 statistics**, one per column PVOutput has, whatever the fields are set to: v1-v12 and
 normalised output, named e.g. *My System v2 Power Generation (PVOutput history)*
 (statistic `pvoutput_uploader:<system id>_v2`).
